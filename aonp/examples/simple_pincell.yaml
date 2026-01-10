@@ -1,0 +1,57 @@
+# AONP Study Specification: Simple PWR Pin Cell
+# This is a reference case for validation and testing
+
+name: "simple_pincell_v1"
+description: "Single UO2 fuel pin cell with light water moderator"
+
+# Material definitions
+materials:
+  # 3.1% enriched UO2 fuel
+  fuel:
+    density: 10.4
+    density_units: "g/cm3"
+    temperature: 900.0  # Kelvin
+    nuclides:
+      - name: "U235"
+        fraction: 0.03
+        fraction_type: "ao"
+      - name: "U238"
+        fraction: 0.27
+        fraction_type: "ao"
+      - name: "O16"
+        fraction: 0.70
+        fraction_type: "ao"
+  
+  # Light water moderator
+  moderator:
+    density: 1.0
+    density_units: "g/cm3"
+    temperature: 600.0  # Kelvin
+    nuclides:
+      - name: "H1"
+        fraction: 0.6667
+        fraction_type: "ao"
+      - name: "O16"
+        fraction: 0.3333
+        fraction_type: "ao"
+
+# Geometry definition
+geometry:
+  type: "script"
+  script: "aonp/examples/pincell_geometry.py"
+
+# Monte Carlo settings
+settings:
+  batches: 120
+  inactive: 20
+  particles: 10000
+  seed: 42
+
+# Nuclear data library
+# NOTE: Update this path to match your system
+nuclear_data:
+  library: "endfb71"
+  path: "/home/user/nuclear_data/endfb-vii.1-hdf5/"
+  temperature_method: "interpolation"
+  temperature_tolerance: 200.0
+

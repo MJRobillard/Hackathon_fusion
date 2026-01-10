@@ -1,0 +1,35 @@
+# AONP - Agent-Orchestrated Neutronics Platform
+# Requirements for v0 Vertical Slice
+
+# Core dependencies
+pydantic>=2.0.0,<3.0.0
+pyyaml>=6.0
+pandas>=2.0.0
+pyarrow>=12.0.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Scientific computing
+# Note: OpenMC only works on Linux/macOS (or WSL on Windows)
+# The core AONP functionality (validation, hashing, bundling) works without OpenMC
+# Only needed for actual simulations
+# Install separately on Linux: pip install openmc
+# See: https://docs.openmc.org/en/stable/usersguide/install.html
+# openmc>=0.14.0  # Uncomment if on Linux/macOS
+
+# LangChain dependencies
+langchain>=0.1.0
+langgraph>=0.2.0  # Multi-agent state machines
+langchain-openai>=0.0.5  # For OpenAI models
+langchain-anthropic>=0.1.0  # For Anthropic models
+langsmith>=0.0.77  # For tracing (optional)
+python-dotenv>=1.0.0  # For loading .env
+pymongo>=4.6.0  # For MongoDB checkpointing
+
+# Development dependencies (optional)
+pytest>=7.4.0
+httpx>=0.25.0  # For FastAPI testing
+black>=23.0.0
+ruff>=0.1.0
+

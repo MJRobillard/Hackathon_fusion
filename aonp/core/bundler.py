@@ -1,0 +1,260 @@
+"""
+Bundle creation and XML generation for OpenMC simulations.
+"""
+
+import json
+import secrets
+import shutil
+from pathlib import Path
+from typing import Tuple, Optional
+import importlib.util
+
+from aonp.schemas.study import StudySpec
+from aonp.schemas.manifest import RunManifest, NuclearDataReference
+
+
+def create_run_bundle(
+    study: StudySpec,
+    run_id: Optional[str] = None,
+    base_dir: Path = Path("runs")
+) -> Tuple[Path, str]:
+    """
+    Create a self-contained run bundle with complete provenance.
+    
+    Args:
+        study: Validated StudySpec object
+        run_id: Optional run identifier (generated if not provided)
+        base_dir: Base directory for runs (default: ./runs)
+    
+    Returns:
+        Tuple of (run_directory, spec_hash)
+    
+    Directory structure created:
+        runs/run_{id}/
+        ├── study_spec.json          # Canonical input
+        ├── run_manifest.json        # Provenance metadata
+        ├── nuclear_data.ref.json    # Nuclear data references
+        ├── inputs/                  # OpenMC XML files
+        │   ├── materials.xml
+        │   ├── geometry.xml
+        │   ├── settings.xml
+        │   └── geometry_script.py   # Copy of user script
+        └── outputs/                 # Created during execution
+    """
+    # Generate run ID if not provided
+    if run_id is None:
+        random_suffix = secrets.token_hex(6)
+        run_id = f"run_{random_suffix}"
+    
+    # Get canonical hash
+    spec_hash = study.get_canonical_hash()
+    
+    # Create directory structure
+    run_dir = base_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    
+    inputs_dir = run_dir / "inputs"
+    outputs_dir = run_dir / "outputs"
+    inputs_dir.mkdir(exist_ok=True)
+    outputs_dir.mkdir(exist_ok=True)
+    
+    # Write canonical study specification
+    study_spec_path = run_dir / "study_spec.json"
+    with open(study_spec_path, 'w') as f:
+        json.dump(
+            study.model_dump(),
+            f,
+            sort_keys=True,
+            indent=2
+        )
+    
+    # Create run manifest
+    manifest = RunManifest.create(run_id=run_id, spec_hash=spec_hash)
+    manifest_path = run_dir / "run_manifest.json"
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest.model_dump(), f, indent=2)
+    
+    # Create nuclear data reference
+    nd_ref = NuclearDataReference.create(
+        library=study.nuclear_data.library,
+        version=study.nuclear_data.library.upper(),  # Simplified version
+        cross_sections_path=str(Path(study.nuclear_data.path) / "cross_sections.xml")
+    )
+    nd_ref_path = run_dir / "nuclear_data.ref.json"
+    with open(nd_ref_path, 'w') as f:
+        json.dump(nd_ref.model_dump(), f, indent=2)
+    
+    # Generate OpenMC XML files
+    try:
+        write_materials_xml(study, inputs_dir / "materials.xml")
+        write_geometry_xml(study, inputs_dir)
+        write_settings_xml(study, inputs_dir / "settings.xml")
+        
+        print(f"[OK] Bundle created: {run_dir}")
+        print(f"     Run ID: {run_id}")
+        print(f"     Spec hash: {spec_hash[:12]}...")
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to generate XML files: {e}")
+        raise
+    
+    return run_dir, spec_hash
+
+
+def write_materials_xml(study: StudySpec, output_path: Path):
+    """
+    Generate materials.xml from study specification.
+    
+    Args:
+        study: StudySpec with material definitions
+        output_path: Path to write materials.xml
+    """
+    try:
+        import openmc
+    except ImportError:
+        print("[WARNING] OpenMC not installed. Creating placeholder materials.xml")
+        # Create a placeholder XML for systems without OpenMC
+        with open(output_path, 'w') as f:
+            f.write('<?xml version="1.0"?>\n<materials>\n')
+            for mat_name, mat_spec in study.materials.items():
+                f.write(f'  <!-- Material: {mat_name} -->\n')
+                f.write(f'  <!-- Density: {mat_spec.density} {mat_spec.density_units} -->\n')
+                f.write(f'  <!-- Temperature: {mat_spec.temperature} K -->\n')
+            f.write('</materials>\n')
+        return
+    
+    materials = openmc.Materials()
+    
+    for mat_name, mat_spec in study.materials.items():
+        mat = openmc.Material(name=mat_name)
+        
+        # Set density
+        mat.set_density(mat_spec.density_units, mat_spec.density)
+        
+        # Set temperature
+        mat.temperature = mat_spec.temperature
+        
+        # Add nuclides
+        for nuclide in mat_spec.nuclides:
+            mat.add_nuclide(
+                nuclide.name,
+                nuclide.fraction,
+                nuclide.fraction_type
+            )
+        
+        materials.append(mat)
+    
+    materials.export_to_xml(output_path)
+    print(f"[OK] Generated: {output_path}")
+
+
+def write_geometry_xml(study: StudySpec, inputs_dir: Path):
+    """
+    Generate geometry.xml by executing user-provided script.
+    
+    Args:
+        study: StudySpec with geometry definition
+        inputs_dir: Directory to write geometry.xml
+    """
+    if study.geometry.type != "script":
+        raise NotImplementedError("Only script-based geometry currently supported")
+    
+    try:
+        import openmc
+    except ImportError:
+        print("[WARNING] OpenMC not installed. Creating placeholder geometry.xml")
+        output_path = inputs_dir / "geometry.xml"
+        with open(output_path, 'w') as f:
+            f.write('<?xml version="1.0"?>\n<geometry>\n')
+            f.write('  <!-- Geometry defined by script: {} -->\n'.format(study.geometry.script))
+            f.write('</geometry>\n')
+        return
+    
+    # Copy geometry script to inputs directory
+    script_path = Path(study.geometry.script)
+    if not script_path.exists():
+        raise FileNotFoundError(f"Geometry script not found: {script_path}")
+    
+    script_copy = inputs_dir / "geometry_script.py"
+    shutil.copy(script_path, script_copy)
+    
+    # Import and execute geometry script
+    spec = importlib.util.spec_from_file_location("geom_module", script_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    
+    # Script must define create_geometry() function
+    if not hasattr(module, 'create_geometry'):
+        raise AttributeError("Geometry script must define create_geometry() function")
+    
+    # Create OpenMC materials for geometry script
+    materials_dict = {}
+    for mat_name, mat_spec in study.materials.items():
+        mat = openmc.Material(name=mat_name)
+        mat.set_density(mat_spec.density_units, mat_spec.density)
+        mat.temperature = mat_spec.temperature
+        for nuclide in mat_spec.nuclides:
+            mat.add_nuclide(nuclide.name, nuclide.fraction, nuclide.fraction_type)
+        materials_dict[mat_name] = mat
+    
+    # Call create_geometry with materials
+    geometry = module.create_geometry(materials_dict)
+    
+    # Export to XML
+    output_path = inputs_dir / "geometry.xml"
+    geometry.export_to_xml(output_path)
+    print(f"[OK] Generated: {output_path}")
+
+
+def write_settings_xml(study: StudySpec, output_path: Path):
+    """
+    Generate settings.xml from study specification.
+    
+    Args:
+        study: StudySpec with settings definitions
+        output_path: Path to write settings.xml
+    """
+    try:
+        import openmc
+        import openmc.stats
+    except ImportError:
+        print("[WARNING] OpenMC not installed. Creating placeholder settings.xml")
+        with open(output_path, 'w') as f:
+            f.write('<?xml version="1.0"?>\n<settings>\n')
+            f.write(f'  <batches>{study.settings.batches}</batches>\n')
+            f.write(f'  <inactive>{study.settings.inactive}</inactive>\n')
+            f.write(f'  <particles>{study.settings.particles}</particles>\n')
+            f.write(f'  <seed>{study.settings.seed}</seed>\n')
+            f.write('</settings>\n')
+        return
+    
+    settings = openmc.Settings()
+    
+    # Batch configuration
+    settings.batches = study.settings.batches
+    settings.inactive = study.settings.inactive
+    settings.particles = study.settings.particles
+    settings.seed = study.settings.seed
+    
+    # Source definition
+    if study.settings.source:
+        source = openmc.IndependentSource()
+        source.space = openmc.stats.Point(study.settings.source.position)
+        source.energy = openmc.stats.Discrete([study.settings.source.energy], [1.0])
+        settings.source = source
+    else:
+        # Default: uniform fission source in small box
+        bounds = [-0.62, -0.62, -1, 0.62, 0.62, 1]
+        uniform_dist = openmc.stats.Box(bounds[:3], bounds[3:])
+        settings.source = openmc.IndependentSource(space=uniform_dist)
+    
+    # Shannon entropy mesh (for convergence monitoring)
+    entropy_mesh = openmc.RegularMesh()
+    entropy_mesh.lower_left = [-0.62, -0.62, -1]
+    entropy_mesh.upper_right = [0.62, 0.62, 1]
+    entropy_mesh.dimension = [10, 10, 1]
+    settings.entropy_mesh = entropy_mesh
+    
+    settings.export_to_xml(output_path)
+    print(f"[OK] Generated: {output_path}")
+
