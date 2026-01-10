@@ -52,8 +52,65 @@ class RouterAgent:
     - analysis: Analyze/compare specific runs
     """
     
-    def __init__(self):
+    def __init__(self, use_llm: bool = True):
+        """
+        Initialize Router Agent
+        
+        Args:
+            use_llm: If False, use fast keyword-based routing (useful for testing)
+        """
         self.llm = llm
+        self.use_llm = use_llm
+    
+    def _keyword_route(self, query: str) -> Dict[str, Any]:
+        """
+        Fast keyword-based routing (no LLM required)
+        Good for testing and when LLM is unavailable
+        """
+        query_lower = query.lower()
+        
+        # Check for sweep keywords
+        sweep_keywords = ['compare', 'sweep', 'vary', 'range', 'from', 'to', 'between', 'multiple']
+        if any(kw in query_lower for kw in sweep_keywords):
+            # But not if it's comparing specific run IDs
+            if 'run_' not in query_lower:
+                return {
+                    "agent": "sweep",
+                    "intent": "sweep",
+                    "context": {"query": query},
+                    "confidence": 0.8,
+                    "method": "keyword"
+                }
+        
+        # Check for query keywords
+        query_keywords = ['show', 'list', 'find', 'search', 'get', 'fetch', 'recent', 'all', 'statistics', 'stats']
+        if any(kw in query_lower for kw in query_keywords):
+            return {
+                "agent": "query",
+                "intent": "query",
+                "context": {"query": query},
+                "confidence": 0.8,
+                "method": "keyword"
+            }
+        
+        # Check for analysis keywords (specific run comparisons)
+        if 'run_' in query_lower and ('compare' in query_lower or 'analyze' in query_lower or 'analysis' in query_lower):
+            return {
+                "agent": "analysis",
+                "intent": "analysis",
+                "context": {"query": query},
+                "confidence": 0.8,
+                "method": "keyword"
+            }
+        
+        # Default to single study
+        return {
+            "agent": "studies",
+            "intent": "single_study",
+            "context": {"query": query},
+            "confidence": 0.7,
+            "method": "keyword"
+        }
     
     def route_query(self, query: str) -> Dict[str, Any]:
         """
@@ -64,11 +121,18 @@ class RouterAgent:
                 "agent": "studies" | "sweep" | "query" | "analysis",
                 "intent": str,
                 "context": dict,
-                "confidence": float
+                "confidence": float,
+                "raw_response": str (optional, for debugging)
             }
         """
         print(f"\n[ROUTER] Analyzing query: {query[:60]}...")
         
+        # Use keyword routing if LLM is disabled
+        if not self.use_llm:
+            print(f"[ROUTER] Using keyword-based routing (LLM disabled)")
+            return self._keyword_route(query)
+        
+        # Try LLM routing
         system_prompt = """You are a routing agent for nuclear simulation requests.
 
 Classify the user's request into ONE of these categories:
@@ -84,27 +148,72 @@ Respond with ONLY the category name, nothing else."""
             HumanMessage(content=f"User request: {query}")
         ]
         
-        response = self.llm.invoke(messages)
-        intent = response.content.strip().lower().replace('"', '').replace("'", "")
-        
-        # Map intent to agent
-        intent_to_agent = {
-            "single_study": "studies",
-            "sweep": "sweep",
-            "query": "query",
-            "analysis": "analysis"
-        }
-        
-        agent = intent_to_agent.get(intent, "studies")  # Default to studies
-        
-        print(f"[ROUTER] Intent: {intent} → Agent: {agent}")
-        
-        return {
-            "agent": agent,
-            "intent": intent,
-            "context": {"query": query},
-            "confidence": 0.9  # Placeholder
-        }
+        try:
+            # Call LLM
+            response = self.llm.invoke(messages)
+            raw_response = response.content.strip()
+            print(f"[ROUTER] Raw LLM response: '{raw_response}'")
+            
+            # Clean up response
+            intent = raw_response.lower().replace('"', '').replace("'", "").replace(".", "").strip()
+            print(f"[ROUTER] Cleaned intent: '{intent}'")
+            
+            # Map intent to agent
+            intent_to_agent = {
+                "single_study": "studies",
+                "sweep": "sweep",
+                "query": "query",
+                "analysis": "analysis"
+            }
+            
+            # Check for exact match
+            if intent in intent_to_agent:
+                agent = intent_to_agent[intent]
+                confidence = 0.9
+            else:
+                # Try fuzzy matching as fallback
+                print(f"[ROUTER WARNING] Intent '{intent}' not recognized, trying fuzzy match...")
+                
+                # Check if any keywords match
+                if "sweep" in intent or "vary" in intent or "compare" in intent:
+                    intent = "sweep"
+                    agent = "sweep"
+                    confidence = 0.6
+                elif "query" in intent or "search" in intent or "list" in intent or "show" in intent:
+                    intent = "query"
+                    agent = "query"
+                    confidence = 0.6
+                elif "analysis" in intent or "analyze" in intent:
+                    intent = "analysis"
+                    agent = "analysis"
+                    confidence = 0.6
+                else:
+                    # Default to single_study
+                    print(f"[ROUTER WARNING] No match found, defaulting to 'single_study'")
+                    intent = "single_study"
+                    agent = "studies"
+                    confidence = 0.5
+            
+            print(f"[ROUTER] Final: Intent='{intent}' → Agent='{agent}' (confidence={confidence})")
+            
+            return {
+                "agent": agent,
+                "intent": intent,
+                "context": {"query": query},
+                "confidence": confidence,
+                "raw_response": raw_response,  # Include for debugging
+                "method": "llm"
+            }
+            
+        except Exception as e:
+            # Handle LLM errors gracefully - fall back to keyword routing
+            print(f"[ROUTER ERROR] LLM invocation failed: {e}")
+            print(f"[ROUTER] Falling back to keyword-based routing")
+            
+            result = self._keyword_route(query)
+            result["error"] = str(e)
+            result["fallback"] = True
+            return result
 
 
 # ============================================================================
@@ -175,6 +284,20 @@ class StudiesAgent:
     
     def _extract_spec(self, query: str) -> Dict[str, Any]:
         """Extract study specification from natural language"""
+        
+        # First try keyword-based extraction as fallback
+        try:
+            spec = self._keyword_extract_spec(query)
+            
+            # If keyword extraction found specific values, use it
+            # Otherwise try LLM for better parsing
+            if spec["enrichment_pct"] is not None or spec["temperature_K"] is not None:
+                print(f"[STUDIES AGENT] Using keyword-based spec extraction")
+                return spec
+        except Exception as e:
+            print(f"[STUDIES AGENT] Keyword extraction failed: {e}")
+        
+        # Try LLM-based extraction
         system_prompt = """You are a nuclear reactor physics expert.
 
 Extract a simulation study specification from the user's request.
@@ -195,9 +318,9 @@ Use reasonable defaults if not specified. Output JSON only, no explanation."""
             HumanMessage(content=f"User request: {query}")
         ]
         
-        response = self.llm.invoke(messages)
-        
         try:
+            response = self.llm.invoke(messages)
+            
             content = response.content
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0]
@@ -205,18 +328,63 @@ Use reasonable defaults if not specified. Output JSON only, no explanation."""
                 content = content.split("```")[1].split("```")[0]
             
             spec = json.loads(content.strip())
+            print(f"[STUDIES AGENT] Using LLM-based spec extraction")
             return spec
         except Exception as e:
-            print(f"[STUDIES AGENT] Failed to parse spec: {e}")
-            # Fallback spec
-            return {
-                "geometry": "PWR pin cell",
-                "materials": ["UO2", "Zircaloy", "Water"],
-                "enrichment_pct": 4.5,
-                "temperature_K": 600,
-                "particles": 10000,
-                "batches": 50
-            }
+            print(f"[STUDIES AGENT] LLM extraction failed: {e}, falling back to keyword extraction")
+            # Fall back to keyword extraction
+            return self._keyword_extract_spec(query)
+    
+    def _keyword_extract_spec(self, query: str) -> Dict[str, Any]:
+        """
+        Simple keyword-based spec extraction (no LLM required)
+        Fast fallback for when LLM is unavailable
+        """
+        import re
+        
+        query_lower = query.lower()
+        
+        # Default spec
+        spec = {
+            "geometry": "PWR pin cell",
+            "materials": ["UO2", "Zircaloy", "Water"],
+            "enrichment_pct": None,
+            "temperature_K": None,
+            "particles": 10000,
+            "batches": 50
+        }
+        
+        # Extract geometry
+        if "bwr" in query_lower:
+            spec["geometry"] = "BWR assembly"
+        elif "pwr" in query_lower:
+            spec["geometry"] = "PWR pin cell"
+        
+        # Extract enrichment (look for patterns like "4.5%", "4.5 percent", "3% enriched")
+        enrichment_patterns = [
+            r'(\d+\.?\d*)\s*%',  # "4.5%"
+            r'(\d+\.?\d*)\s*percent',  # "4.5 percent"
+            r'enrichment[:\s]+(\d+\.?\d*)',  # "enrichment: 4.5"
+        ]
+        for pattern in enrichment_patterns:
+            match = re.search(pattern, query_lower)
+            if match:
+                spec["enrichment_pct"] = float(match.group(1))
+                break
+        
+        # Extract temperature (look for patterns like "600K", "600 K", "900 kelvin")
+        temp_patterns = [
+            r'(\d+\.?\d*)\s*k(?:\s|$)',  # "600K" or "600 K"
+            r'(\d+\.?\d*)\s*kelvin',  # "600 kelvin"
+            r'temperature[:\s]+(\d+\.?\d*)',  # "temperature: 600"
+        ]
+        for pattern in temp_patterns:
+            match = re.search(pattern, query_lower)
+            if match:
+                spec["temperature_K"] = float(match.group(1))
+                break
+        
+        return spec
 
 
 # ============================================================================
@@ -293,6 +461,16 @@ class SweepAgent:
     
     def _extract_sweep_config(self, query: str) -> Dict[str, Any]:
         """Extract sweep configuration from natural language"""
+        
+        # Try keyword-based extraction first (fast, no LLM)
+        try:
+            config = self._keyword_extract_sweep_config(query)
+            print(f"[SWEEP AGENT] Using keyword-based config extraction")
+            return config
+        except Exception as e:
+            print(f"[SWEEP AGENT] Keyword extraction failed: {e}, trying LLM...")
+        
+        # Try LLM-based extraction
         system_prompt = """You are a nuclear reactor physics expert.
 
 Extract a parameter sweep configuration from the user's request.
@@ -318,9 +496,9 @@ Output JSON only, no explanation."""
             HumanMessage(content=f"User request: {query}")
         ]
         
-        response = self.llm.invoke(messages)
-        
         try:
+            response = self.llm.invoke(messages)
+            
             content = response.content
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0]
@@ -328,21 +506,87 @@ Output JSON only, no explanation."""
                 content = content.split("```")[1].split("```")[0]
             
             config = json.loads(content.strip())
+            print(f"[SWEEP AGENT] Using LLM-based config extraction")
             return config
         except Exception as e:
-            print(f"[SWEEP AGENT] Failed to parse config: {e}")
-            # Fallback config
-            return {
-                "base_spec": {
-                    "geometry": "PWR pin cell",
-                    "materials": ["UO2", "Zircaloy", "Water"],
-                    "temperature_K": 600,
-                    "particles": 10000,
-                    "batches": 50
-                },
-                "param_name": "enrichment_pct",
-                "param_values": [3.0, 3.5, 4.0, 4.5, 5.0]
-            }
+            print(f"[SWEEP AGENT] LLM extraction failed: {e}, falling back to keyword extraction")
+            # Fall back to keyword extraction
+            return self._keyword_extract_sweep_config(query)
+    
+    def _keyword_extract_sweep_config(self, query: str) -> Dict[str, Any]:
+        """
+        Simple keyword-based sweep config extraction (no LLM required)
+        """
+        import re
+        
+        query_lower = query.lower()
+        
+        # Base spec
+        base_spec = {
+            "geometry": "PWR pin cell",
+            "materials": ["UO2", "Zircaloy", "Water"],
+            "enrichment_pct": None,
+            "temperature_K": 600,
+            "particles": 10000,
+            "batches": 50
+        }
+        
+        # Determine parameter to sweep
+        param_name = "enrichment_pct"  # Default
+        param_values = []
+        
+        # Check if sweeping temperature
+        if any(word in query_lower for word in ["temperature", "temp", "kelvin"]):
+            param_name = "temperature_K"
+            
+            # Extract temperature range
+            temp_pattern = r'(\d+)\s*k?\s*(?:to|through|-)\s*(\d+)\s*k?'
+            match = re.search(temp_pattern, query_lower)
+            if match:
+                start = float(match.group(1))
+                end = float(match.group(2))
+                # Generate 5 points
+                step = (end - start) / 4
+                param_values = [start + i * step for i in range(5)]
+            else:
+                # Default temperature sweep
+                param_values = [300, 450, 600, 750, 900]
+        
+        # Check if sweeping enrichment (default)
+        else:
+            # Extract enrichment range
+            enrich_patterns = [
+                r'(\d+\.?\d*)\s*%?\s*(?:to|through|-)\s*(\d+\.?\d*)\s*%?',
+                r'enrichment[s]?\s+(\d+\.?\d*)\s*%?\s*(?:to|through|-)\s*(\d+\.?\d*)\s*%?',
+            ]
+            
+            for pattern in enrich_patterns:
+                match = re.search(pattern, query_lower)
+                if match:
+                    start = float(match.group(1))
+                    end = float(match.group(2))
+                    # Generate 5 points
+                    step = (end - start) / 4
+                    param_values = [start + i * step for i in range(5)]
+                    break
+            
+            # Check for explicit list of values
+            if not param_values:
+                # Look for patterns like "3%, 4%, 5%" or "3, 4, 5"
+                values_pattern = r'(\d+\.?\d*)\s*%?\s*,\s*(\d+\.?\d*)\s*%?(?:\s*,\s*(\d+\.?\d*)\s*%?)?'
+                matches = re.findall(r'(\d+\.?\d*)\s*%?', query_lower)
+                if matches:
+                    param_values = [float(m) for m in matches if 0 < float(m) < 100]
+            
+            # Default enrichment sweep if nothing found
+            if not param_values:
+                param_values = [3.0, 3.5, 4.0, 4.5, 5.0]
+        
+        return {
+            "base_spec": base_spec,
+            "param_name": param_name,
+            "param_values": param_values
+        }
 
 
 # ============================================================================

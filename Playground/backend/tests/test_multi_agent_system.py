@@ -29,7 +29,7 @@ class TestRouterAgent:
     
     def test_route_single_study(self):
         """Test routing single study request"""
-        router = RouterAgent()
+        router = RouterAgent(use_llm=False)  # Use fast keyword routing
         result = router.route_query("Simulate a PWR pin cell with 4.5% enriched UO2")
         
         assert result["agent"] == "studies"
@@ -38,7 +38,7 @@ class TestRouterAgent:
     
     def test_route_sweep(self):
         """Test routing sweep request"""
-        router = RouterAgent()
+        router = RouterAgent(use_llm=False)  # Use fast keyword routing
         result = router.route_query("Compare enrichments from 3% to 5%")
         
         assert result["agent"] == "sweep"
@@ -46,7 +46,7 @@ class TestRouterAgent:
     
     def test_route_query(self):
         """Test routing query request"""
-        router = RouterAgent()
+        router = RouterAgent(use_llm=False)  # Use fast keyword routing
         result = router.route_query("Show me all PWR simulations")
         
         assert result["agent"] == "query"
@@ -54,7 +54,7 @@ class TestRouterAgent:
     
     def test_route_analysis(self):
         """Test routing analysis request"""
-        router = RouterAgent()
+        router = RouterAgent(use_llm=False)  # Use fast keyword routing
         result = router.route_query("Compare run_abc123 and run_def456")
         
         # Should route to analysis or query
@@ -62,7 +62,7 @@ class TestRouterAgent:
     
     def test_route_ambiguous_defaults_to_studies(self):
         """Test that ambiguous queries default to studies"""
-        router = RouterAgent()
+        router = RouterAgent(use_llm=False)  # Use fast keyword routing
         result = router.route_query("Tell me about nuclear reactors")
         
         # Should have a valid agent assignment
@@ -493,7 +493,7 @@ class TestPerformance:
         """Test routing performance"""
         import time
         
-        router = RouterAgent()
+        router = RouterAgent(use_llm=False)  # Use fast keyword routing for performance test
         queries = [
             "Simulate PWR",
             "Compare enrichments",
@@ -506,8 +506,8 @@ class TestPerformance:
             router.route_query(query)
         elapsed = time.time() - start
         
-        # Routing should be fast (< 5 seconds for 4 queries)
-        assert elapsed < 5
+        # Routing should be fast (< 1 second for 4 queries with keyword routing)
+        assert elapsed < 1
     
     def test_end_to_end_performance(self):
         """Test end-to-end performance"""

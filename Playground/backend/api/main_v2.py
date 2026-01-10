@@ -40,6 +40,7 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 class QueryRequest(BaseModel):
     """Natural language query request"""
     query: str = Field(..., min_length=1, max_length=500)
+    use_llm: bool = Field(default=False, description="Use LLM for routing (slower but more accurate). False = fast keyword routing")
     options: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class QueryResponse(BaseModel):
@@ -232,7 +233,7 @@ async def shutdown_event():
 # BACKGROUND TASK: EXECUTE MULTI-AGENT QUERY
 # ============================================================================
 
-async def execute_multi_agent_query(query_id: str, query: str, mongodb):
+async def execute_multi_agent_query(query_id: str, query: str, mongodb, use_llm: bool = True):
     """Execute multi-agent workflow in background"""
     try:
         # Publish start event
@@ -247,8 +248,18 @@ async def execute_multi_agent_query(query_id: str, query: str, mongodb):
             {"$set": {"status": "processing"}}
         )
         
+        # Publish routing event
+        await event_bus.publish(query_id, {
+            "type": "routing",
+            "message": "Analyzing query intent...",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        
         # Create orchestrator and process query
+        from multi_agent_system import MultiAgentOrchestrator, RouterAgent
         orchestrator = MultiAgentOrchestrator()
+        # Override router with configured LLM setting
+        orchestrator.router = RouterAgent(use_llm=use_llm)
         
         # Run in thread pool since it's synchronous
         loop = asyncio.get_event_loop()
@@ -346,7 +357,7 @@ async def submit_query(
     await mongodb.queries.insert_one(query_doc)
     
     # Start execution in background
-    background_tasks.add_task(execute_multi_agent_query, query_id, body.query, mongodb)
+    background_tasks.add_task(execute_multi_agent_query, query_id, body.query, mongodb, body.use_llm)
     
     # Prepare response
     stream_url = None
@@ -426,6 +437,74 @@ async def stream_query_progress(query_id: str):
             "Connection": "keep-alive"
         }
     )
+
+# ============================================================================
+# ROUTES: AGENT-SPECIFIC ENDPOINTS
+# ============================================================================
+
+@app.post("/api/v1/agents/studies")
+async def run_studies_agent(body: QueryRequest):
+    """
+    Run Studies Agent directly (for single simulations)
+    """
+    from multi_agent_system import StudiesAgent
+    
+    agent = StudiesAgent()
+    result = agent.execute({"query": body.query})
+    
+    return result
+
+
+@app.post("/api/v1/agents/sweep")
+async def run_sweep_agent(body: QueryRequest):
+    """
+    Run Sweep Agent directly (for parameter sweeps)
+    """
+    from multi_agent_system import SweepAgent
+    
+    agent = SweepAgent()
+    result = agent.execute({"query": body.query})
+    
+    return result
+
+
+@app.post("/api/v1/agents/query")
+async def run_query_agent(body: QueryRequest):
+    """
+    Run Query Agent directly (for database searches)
+    """
+    from multi_agent_system import QueryAgent
+    
+    agent = QueryAgent()
+    result = agent.execute({"query": body.query})
+    
+    return result
+
+
+@app.post("/api/v1/agents/analysis")
+async def run_analysis_agent(body: QueryRequest):
+    """
+    Run Analysis Agent directly (for result comparisons)
+    """
+    from multi_agent_system import AnalysisAgent
+    
+    agent = AnalysisAgent()
+    result = agent.execute({"query": body.query})
+    
+    return result
+
+
+@app.post("/api/v1/router")
+async def route_query(body: QueryRequest):
+    """
+    Test router only (doesn't execute, just shows which agent would be selected)
+    """
+    from multi_agent_system import RouterAgent
+    
+    router = RouterAgent(use_llm=body.use_llm)
+    result = router.route_query(body.query)
+    
+    return result
 
 # ============================================================================
 # ROUTES: DIRECT TOOL ACCESS (BYPASS AGENTS)
