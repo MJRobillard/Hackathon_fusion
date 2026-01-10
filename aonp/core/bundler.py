@@ -125,8 +125,10 @@ def write_materials_xml(study: StudySpec, output_path: Path):
     
     materials = openmc.Materials()
     
+    mat_id = 1
     for mat_name, mat_spec in study.materials.items():
-        mat = openmc.Material(name=mat_name)
+        mat = openmc.Material(material_id=mat_id, name=mat_name)
+        mat_id += 1
         
         # Set density
         mat.set_density(mat_spec.density_units, mat_spec.density)
@@ -189,8 +191,10 @@ def write_geometry_xml(study: StudySpec, inputs_dir: Path):
     
     # Create OpenMC materials for geometry script
     materials_dict = {}
+    mat_id = 1
     for mat_name, mat_spec in study.materials.items():
-        mat = openmc.Material(name=mat_name)
+        mat = openmc.Material(material_id=mat_id, name=mat_name)
+        mat_id += 1
         mat.set_density(mat_spec.density_units, mat_spec.density)
         mat.temperature = mat_spec.temperature
         for nuclide in mat_spec.nuclides:
