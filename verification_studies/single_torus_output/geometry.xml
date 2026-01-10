@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<geometry>
+  <cell id="1" name="plasma_vacuum" material="void" region="-3 5 -6" universe="2"/>
+  <cell id="2" name="steel_wall" material="3" region="3 -4 5 -6" universe="2"/>
+  <cell id="3" name="outer_vacuum" material="void" region="4 -7 8 5 -6" universe="2"/>
+  <surface id="3" type="z-torus" coeffs="0.0 0.0 0.0 400.0 150.0 150.0"/>
+  <surface id="4" type="z-torus" coeffs="0.0 0.0 0.0 400.0 170.0 170.0"/>
+  <surface id="5" type="z-plane" boundary="vacuum" coeffs="-250"/>
+  <surface id="6" type="z-plane" boundary="vacuum" coeffs="250"/>
+  <surface id="7" type="z-cylinder" boundary="vacuum" coeffs="0.0 0.0 620.0"/>
+  <surface id="8" type="z-cylinder" boundary="vacuum" coeffs="0.0 0.0 180.0"/>
+</geometry>

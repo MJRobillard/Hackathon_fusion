@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<tallies>
+  <filter id="1" type="cell">
+    <bins>1 2</bins>
+  </filter>
+  <tally id="1" name="flux">
+    <filters>1</filters>
+    <scores>flux</scores>
+  </tally>
+  <tally id="2" name="heating">
+    <filters>1</filters>
+    <scores>heating</scores>
+  </tally>
+  <tally id="3" name="absorption">
+    <filters>1</filters>
+    <scores>absorption</scores>
+  </tally>
+</tallies>

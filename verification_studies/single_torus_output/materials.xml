@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='utf-8'?>
+<materials>
+  <material id="3" name="SS316">
+    <density value="7.99" units="g/cm3"/>
+    <nuclide name="Fe54" wo="0.03669612844759456"/>
+    <nuclide name="Fe56" wo="0.597359937067156"/>
+    <nuclide name="Fe57" wo="0.014042395988885138"/>
+    <nuclide name="Fe58" wo="0.0019015384963643825"/>
+    <nuclide name="Cr50" wo="0.007095267258621133"/>
+    <nuclide name="Cr52" wo="0.14228891599728805"/>
+    <nuclide name="Cr53" wo="0.016445097591747813"/>
+    <nuclide name="Cr54" wo="0.004170719152343044"/>
+    <nuclide name="Ni58" wo="0.08063724635590787"/>
+    <nuclide name="Ni60" wo="0.03213115547907547"/>
+    <nuclide name="Ni61" wo="0.0014200309023560522"/>
+    <nuclide name="Ni62" wo="0.004601786764184604"/>
+    <nuclide name="Ni64" wo="0.0012097804984760039"/>
+    <nuclide name="Mo92" wo="0.003507972845098637"/>
+    <nuclide name="Mo94" wo="0.0022478295951575073"/>
+    <nuclide name="Mo95" wo="0.0039251160972576206"/>
+    <nuclide name="Mo96" wo="0.00416633408784015"/>
+    <nuclide name="Mo97" wo="0.002419398876882609"/>
+    <nuclide name="Mo98" wo="0.00619684308908685"/>
+    <nuclide name="Mo100" wo="0.002536505408676627"/>
+    <nuclide name="Mn55" wo="0.02"/>
+    <nuclide name="Si28" wo="0.009187351728283676"/>
+    <nuclide name="Si29" wo="0.0004831750292786396"/>
+    <nuclide name="Si30" wo="0.00032947324243768423"/>
+    <nuclide name="C0" wo="0.005"/>
+  </material>
+</materials>

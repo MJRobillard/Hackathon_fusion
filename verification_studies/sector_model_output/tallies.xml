@@ -1,0 +1,42 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<tallies>
+  <mesh id="3" type="cylindrical">
+    <r_grid>0.0 50.0 100.0 150.0 200.0 250.0 300.0 350.0 400.0 450.0 500.0 550.0 600.0 650.0 700.0 750.0 800.0 850.0 900.0 950.0</r_grid>
+    <phi_grid>0.0 0.03490658503988659 0.06981317007977318 0.10471975511965978 0.13962634015954636 0.17453292519943295 0.20943951023931956 0.24434609527920614 0.2792526803190927 0.3141592653589793 0.3490658503988659</phi_grid>
+    <z_grid>-300.0 -260.0 -220.0 -180.0 -140.0 -100.0 -60.0 -20.0 20.0 60.0 100.0 140.0 180.0 220.0 260.0 300.0</z_grid>
+    <origin>0.0 0.0 0.0</origin>
+  </mesh>
+  <filter id="11" type="cell">
+    <bins>1 2 3 4</bins>
+  </filter>
+  <filter id="12" type="cell">
+    <bins>3</bins>
+  </filter>
+  <filter id="13" type="mesh">
+    <bins>3</bins>
+  </filter>
+  <tally id="17" name="cell_flux">
+    <filters>11</filters>
+    <scores>flux</scores>
+  </tally>
+  <tally id="18" name="cell_heating">
+    <filters>11</filters>
+    <scores>heating</scores>
+  </tally>
+  <tally id="19" name="TBR">
+    <filters>12</filters>
+    <scores>(n,Xt)</scores>
+  </tally>
+  <tally id="20" name="multiplication">
+    <filters>12</filters>
+    <scores>(n,2n) (n,3n)</scores>
+  </tally>
+  <tally id="21" name="mesh_flux">
+    <filters>13</filters>
+    <scores>flux</scores>
+  </tally>
+  <tally id="22" name="mesh_heating">
+    <filters>13</filters>
+    <scores>heating</scores>
+  </tally>
+</tallies>

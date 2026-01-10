@@ -7,6 +7,8 @@ import os
 import json
 import hashlib
 import random
+import tempfile
+import shutil
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from uuid import uuid4
@@ -18,7 +20,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 # Configuration: Set to True to use real OpenMC execution
-USE_REAL_OPENMC = os.getenv("USE_REAL_OPENMC", "false").lower() == "true"
+USE_REAL_OPENMC = True
 
 # ============================================================================
 # MONGODB CONNECTION
@@ -113,30 +115,118 @@ def mock_openmc_execution(spec: StudySpec) -> Dict[str, Any]:
 
 def real_openmc_execution(spec: StudySpec, run_id: str) -> Dict[str, Any]:
     """
-    Real OpenMC execution using adapter layer
+    Real OpenMC execution using direct OpenMC API (like verification studies)
     Used when USE_REAL_OPENMC is True
     """
     try:
-        from openmc_adapter import execute_real_openmc
+        import openmc
+        import time
+        import tempfile
+        import shutil
         
-        # Convert StudySpec to simple spec format for adapter
-        simple_spec = {
-            "geometry": spec.geometry,
-            "materials": spec.materials,
-            "enrichment_pct": spec.enrichment_pct,
-            "temperature_K": spec.temperature_K,
-            "particles": spec.particles,
-            "batches": spec.batches
-        }
+        start_time = time.time()
         
-        result = execute_real_openmc(simple_spec, run_id=run_id)
+        # Create temporary directory for this run
+        temp_dir = tempfile.mkdtemp(prefix=f"openmc_{run_id}_")
         
-        return {
-            "keff": result["keff"],
-            "keff_std": result["keff_std"],
-            "runtime_seconds": result["runtime_seconds"],
-            "status": result["status"]
-        }
+        try:
+            # Define materials based on spec
+            materials = []
+            
+            if "UO2" in spec.materials or "fuel" in [m.lower() for m in spec.materials]:
+                # UO2 fuel - use atomic fractions consistently
+                enrichment = spec.enrichment_pct or 4.5
+                temp_k = spec.temperature_K or 900.0
+                
+                # Convert enrichment from weight % to atomic fraction
+                # For UO2: 1 U atom to 2 O atoms
+                u235_frac = enrichment / 100.0
+                u238_frac = 1.0 - u235_frac
+                
+                fuel = openmc.Material(name='UO2')
+                fuel.add_nuclide('U235', u235_frac, 'ao')
+                fuel.add_nuclide('U238', u238_frac, 'ao')
+                fuel.add_nuclide('O16', 2.0, 'ao')
+                fuel.set_density('g/cm3', 10.4)
+                fuel.temperature = temp_k
+                materials.append(fuel)
+            
+            if "Water" in spec.materials or "H2O" in spec.materials:
+                # Light water moderator
+                water = openmc.Material(name='Water')
+                water.add_nuclide('H1', 2.0, 'ao')
+                water.add_nuclide('O16', 1.0, 'ao')
+                water.set_density('g/cm3', 0.7)
+                water.temperature = 600.0
+                materials.append(water)
+            
+            if "Zircaloy" in spec.materials:
+                # Zircaloy cladding
+                zirc = openmc.Material(name='Zircaloy')
+                zirc.add_element('Zr', 1.0)
+                zirc.set_density('g/cm3', 6.5)
+                zirc.temperature = 600.0
+                materials.append(zirc)
+            
+            # Create simple pin cell geometry
+            fuel_or = openmc.ZCylinder(r=0.39)
+            clad_ir = openmc.ZCylinder(r=0.40)
+            clad_or = openmc.ZCylinder(r=0.46)
+            pitch = 1.26
+            box = openmc.model.RectangularPrism(pitch, pitch, boundary_type='reflective')
+            
+            # Define cells
+            fuel_cell = openmc.Cell(name='fuel', fill=materials[0], region=-fuel_or)
+            
+            if len(materials) >= 3:  # fuel, water, zircaloy
+                gap_cell = openmc.Cell(name='gap', region=+fuel_or & -clad_ir)
+                clad_cell = openmc.Cell(name='clad', fill=materials[2], region=+clad_ir & -clad_or)
+                water_cell = openmc.Cell(name='water', fill=materials[1], region=+clad_or & -box)
+                root = openmc.Universe(cells=[fuel_cell, gap_cell, clad_cell, water_cell])
+            else:  # simplified: just fuel and water
+                water_cell = openmc.Cell(name='water', fill=materials[1], region=+fuel_or & -box)
+                root = openmc.Universe(cells=[fuel_cell, water_cell])
+            
+            geometry = openmc.Geometry(root)
+            
+            # Settings
+            settings = openmc.Settings()
+            settings.batches = spec.batches
+            settings.inactive = min(10, spec.batches // 5)
+            settings.particles = spec.particles
+            settings.run_mode = 'eigenvalue'
+            
+            # Create model
+            model = openmc.Model(geometry=geometry, materials=openmc.Materials(materials), settings=settings)
+            
+            # Export and run in temp directory
+            original_dir = os.getcwd()
+            os.chdir(temp_dir)
+            
+            # Run simulation
+            model.export_to_xml()
+            openmc.run()
+            
+            # Read results
+            sp = openmc.StatePoint(f'statepoint.{spec.batches}.h5')
+            keff = sp.keff
+            
+            os.chdir(original_dir)
+            
+            elapsed_time = time.time() - start_time
+            
+            return {
+                "keff": float(keff.nominal_value),
+                "keff_std": float(keff.std_dev),
+                "runtime_seconds": elapsed_time,
+                "status": "completed"
+            }
+            
+        finally:
+            # Clean up temporary directory
+            os.chdir(original_dir) if os.getcwd() == temp_dir else None
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            
     except Exception as e:
         print(f"[ERROR] Real OpenMC execution failed: {e}")
         import traceback
@@ -368,6 +458,119 @@ def get_study_statistics() -> Dict[str, Any]:
     return stats
 
 
+def get_run_by_id(run_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Agent Tool: Get specific run by ID
+    
+    Returns complete run information including spec, results, and metadata
+    """
+    print(f"\n[TOOL: get_run_by_id]")
+    print(f"  run_id: {run_id}")
+    
+    result = summaries_col.find_one({"run_id": run_id})
+    
+    if not result:
+        print(f"  [ERROR] Run {run_id} not found")
+        return None
+    
+    # Remove MongoDB _id
+    result.pop("_id", None)
+    result["created_at"] = result["created_at"].isoformat() if "created_at" in result else None
+    
+    print(f"  [OK] keff = {result['keff']:.5f}")
+    
+    return result
+
+
+def get_recent_runs(limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Agent Tool: Get most recent simulation runs
+    
+    Returns the N most recent runs sorted by creation time
+    """
+    print(f"\n[TOOL: get_recent_runs]")
+    print(f"  limit: {limit}")
+    
+    results = list(summaries_col.find().sort("created_at", -1).limit(limit))
+    
+    # Remove MongoDB _id and format dates
+    for r in results:
+        r.pop("_id", None)
+        r["created_at"] = r["created_at"].isoformat() if "created_at" in r else None
+    
+    print(f"  Found {len(results)} recent runs")
+    
+    return results
+
+
+def validate_physics(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Agent Tool: Validate physics parameters
+    
+    Checks if study specification is physically reasonable
+    Returns validation result with warnings/errors
+    """
+    print(f"\n[TOOL: validate_physics]")
+    
+    validation = {
+        "valid": True,
+        "warnings": [],
+        "errors": []
+    }
+    
+    # Validate enrichment
+    if "enrichment_pct" in spec and spec["enrichment_pct"] is not None:
+        enrichment = spec["enrichment_pct"]
+        if enrichment < 0 or enrichment > 100:
+            validation["valid"] = False
+            validation["errors"].append(f"Enrichment {enrichment}% out of range [0, 100]")
+        elif enrichment < 2.0:
+            validation["warnings"].append(f"Low enrichment {enrichment}% - may be subcritical")
+        elif enrichment > 20.0:
+            validation["warnings"].append(f"High enrichment {enrichment}% - unusual for commercial reactors")
+    
+    # Validate temperature
+    if "temperature_K" in spec and spec["temperature_K"] is not None:
+        temp = spec["temperature_K"]
+        if temp < 0:
+            validation["valid"] = False
+            validation["errors"].append(f"Temperature {temp}K is negative")
+        elif temp < 273:
+            validation["warnings"].append(f"Temperature {temp}K below freezing")
+        elif temp > 3000:
+            validation["warnings"].append(f"Temperature {temp}K very high - fuel may be damaged")
+    
+    # Validate particles and batches
+    if "particles" in spec:
+        particles = spec["particles"]
+        if particles < 100:
+            validation["warnings"].append(f"Very few particles ({particles}) - results will be noisy")
+        elif particles > 1000000:
+            validation["warnings"].append(f"Many particles ({particles}) - simulation will be slow")
+    
+    if "batches" in spec:
+        batches = spec["batches"]
+        if batches < 10:
+            validation["warnings"].append(f"Few batches ({batches}) - statistics may be poor")
+    
+    # Validate materials
+    if "materials" in spec:
+        materials = spec["materials"]
+        known_materials = ["UO2", "Water", "H2O", "Zircaloy", "fuel", "moderator", "coolant"]
+        unknown = [m for m in materials if m not in known_materials and not any(k.lower() in m.lower() for k in known_materials)]
+        if unknown:
+            validation["warnings"].append(f"Unknown materials: {unknown}")
+    
+    status = "valid" if validation["valid"] else "invalid"
+    print(f"  Status: {status}")
+    if validation["warnings"]:
+        print(f"  Warnings: {len(validation['warnings'])}")
+    if validation["errors"]:
+        print(f"  Errors: {len(validation['errors'])}")
+    
+    return validation
+
+
 # ============================================================================
 # TOOL REGISTRY FOR AGENT INTEGRATION
 # ============================================================================
@@ -408,6 +611,27 @@ AGENT_TOOLS = {
         "function": get_study_statistics,
         "description": "Get database statistics and recent runs.",
         "parameters": {}
+    },
+    "get_run_by_id": {
+        "function": get_run_by_id,
+        "description": "Get specific run by ID. Returns complete run information.",
+        "parameters": {
+            "run_id": "Run ID string (e.g. 'run_abc12345')"
+        }
+    },
+    "get_recent_runs": {
+        "function": get_recent_runs,
+        "description": "Get most recent simulation runs.",
+        "parameters": {
+            "limit": "Number of recent runs to return (default 10)"
+        }
+    },
+    "validate_physics": {
+        "function": validate_physics,
+        "description": "Validate physics parameters. Checks if spec is physically reasonable.",
+        "parameters": {
+            "spec": "Study specification dict to validate"
+        }
     }
 }
 

@@ -1,0 +1,24 @@
+ =========================>     TALLY 1: FLUX     <=========================
+
+ Cell 1
+   Total Material
+     Flux                                 18.8577 +/- 0.0188233
+ Cell 2
+   Total Material
+     Flux                                 20.8067 +/- 0.023715
+ =======================>     TALLY 2: HEATING     <========================
+
+ Cell 1
+   Total Material
+     heating                              4.1912e+06 +/- 911.539
+ Cell 2
+   Total Material
+     heating                              721470 +/- 815.202
+ ======================>     TALLY 3: ABSORPTION     <======================
+
+ Cell 1
+   Total Material
+     Absorption Rate                      0.149425 +/- 0.000289571
+ Cell 2
+   Total Material
+     Absorption Rate                      0.209031 +/- 0.000414781

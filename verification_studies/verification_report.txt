@@ -1,0 +1,37 @@
+================================================================================
+OpenMC Verification Suite Report
+================================================================================
+Date: 2026-01-10 12:57:52
+Total runtime: 650.63 seconds
+
+
+Study 1: Two-Volume Toy Geometry
+--------------------------------------------------------------------------------
+Status: PASSED
+Runtime: 5.45 seconds
+
+
+Study 2: Single Layered Torus
+--------------------------------------------------------------------------------
+Status: PASSED
+Runtime: 104.60 seconds
+
+
+Study 3: Multi-Layered Torus
+--------------------------------------------------------------------------------
+Status: FAILED
+Runtime: 0.06 seconds
+Error: TypeError: WithIDFilter.__init__() got an unexpected keyword argument 'materials'
+
+
+Study 4: DEMO Reactor Model
+--------------------------------------------------------------------------------
+Status: PASSED
+Runtime: 129.65 seconds
+
+
+Study 5: Sector Slicing Model
+--------------------------------------------------------------------------------
+Status: PASSED
+Runtime: 156.66 seconds
+

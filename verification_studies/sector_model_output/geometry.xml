@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<geometry>
+  <cell id="1" name="plasma" material="void" region="-28 32 -33 34 -35 36 -37" universe="5"/>
+  <cell id="2" name="first_wall" material="18" region="28 -29 32 -33 34 -35 36 -37" universe="5"/>
+  <cell id="3" name="blanket" material="21" region="29 -30 32 -33 34 -35 36 -37" universe="5"/>
+  <cell id="4" name="vessel" material="22" region="30 -31 32 -33 34 -35 36 -37" universe="5"/>
+  <cell id="5" name="outer_void" material="void" region="31 32 -33 34 -35 36 -37" universe="5"/>
+  <surface id="28" type="z-torus" coeffs="0.0 0.0 0.0 600.0 200.0 200.0"/>
+  <surface id="29" type="z-torus" coeffs="0.0 0.0 0.0 600.0 205.0 205.0"/>
+  <surface id="30" type="z-torus" coeffs="0.0 0.0 0.0 600.0 255.0 255.0"/>
+  <surface id="31" type="z-torus" coeffs="0.0 0.0 0.0 600.0 270.0 270.0"/>
+  <surface id="32" type="z-plane" boundary="vacuum" coeffs="-300"/>
+  <surface id="33" type="z-plane" boundary="vacuum" coeffs="300"/>
+  <surface id="34" type="z-cylinder" boundary="vacuum" coeffs="0.0 0.0 280.0"/>
+  <surface id="35" type="z-cylinder" boundary="vacuum" coeffs="0.0 0.0 920.0"/>
+  <surface id="36" type="y-plane" boundary="reflective" coeffs="0"/>
+  <surface id="37" type="plane" boundary="reflective" coeffs="-0.3420201433256687 0.9396926207859084 0 0"/>
+</geometry>

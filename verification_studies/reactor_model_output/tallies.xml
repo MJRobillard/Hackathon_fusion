@@ -1,0 +1,56 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<tallies>
+  <mesh id="2" type="cylindrical">
+    <r_grid>0.0 100.0 200.0 300.0 400.0 500.0 600.0 700.0 800.0 900.0 1000.0 1100.0 1200.0 1300.0 1400.0</r_grid>
+    <phi_grid>0.0 0.5235987755982988 1.0471975511965976 1.5707963267948966 2.0943951023931953 2.617993877991494 3.141592653589793 3.665191429188092 4.1887902047863905 4.71238898038469 5.235987755982988 5.759586531581287 6.283185307179586</phi_grid>
+    <z_grid>-400.0 -320.0 -240.0 -160.0 -80.0 0.0 80.0 160.0 240.0 320.0 400.0</z_grid>
+    <origin>0.0 0.0 0.0</origin>
+  </mesh>
+  <filter id="6" type="cell">
+    <bins>1 2 3 4 5</bins>
+  </filter>
+  <filter id="7" type="cell">
+    <bins>3 4</bins>
+  </filter>
+  <filter id="8" type="cell">
+    <bins>3</bins>
+  </filter>
+  <filter id="9" type="cell">
+    <bins>4</bins>
+  </filter>
+  <filter id="10" type="mesh">
+    <bins>2</bins>
+  </filter>
+  <tally id="9" name="component_flux">
+    <filters>6</filters>
+    <scores>flux</scores>
+  </tally>
+  <tally id="10" name="component_heating">
+    <filters>6</filters>
+    <scores>heating</scores>
+  </tally>
+  <tally id="11" name="tritium_breeding">
+    <filters>7</filters>
+    <scores>(n,Xt)</scores>
+  </tally>
+  <tally id="12" name="TBR_inboard">
+    <filters>8</filters>
+    <scores>(n,Xt)</scores>
+  </tally>
+  <tally id="13" name="TBR_outboard">
+    <filters>9</filters>
+    <scores>(n,Xt)</scores>
+  </tally>
+  <tally id="14" name="neutron_multiplication">
+    <filters>7</filters>
+    <scores>(n,2n) (n,3n)</scores>
+  </tally>
+  <tally id="15" name="energy_deposition">
+    <filters>6</filters>
+    <scores>heating fission</scores>
+  </tally>
+  <tally id="16" name="mesh_heating">
+    <filters>10</filters>
+    <scores>heating</scores>
+  </tally>
+</tallies>

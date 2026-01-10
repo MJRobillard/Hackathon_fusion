@@ -1,0 +1,19 @@
+# AONP Multi-Agent System Configuration
+# Copy this file to .env and update the values
+
+# MongoDB Connection (required)
+MONGO_URI=mongodb://localhost:27017
+
+# Fireworks API Key (required for LLM)
+# Get your key from: https://fireworks.ai
+FIREWORKS=fw_3uWjV96GfCeWaekJE48uO7Ih
+
+# OpenMC Execution Mode
+# Set to 'true' for real simulations, 'false' for mock (testing)
+USE_REAL_OPENMC=false
+
+# API Settings (optional)
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=http://localhost:3000
+
