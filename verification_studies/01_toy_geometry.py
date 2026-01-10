@@ -53,8 +53,8 @@ def create_toy_geometry():
     outer_sphere = openmc.Sphere(r=20.0, boundary_type='vacuum')
     
     # Cells
-    inner_cell = openmc.Cell(fill=water, region=-inner_sphere)
-    outer_cell = openmc.Cell(fill=steel, region=+inner_sphere & -outer_sphere)
+    inner_cell = openmc.Cell(cell_id=1, fill=water, region=-inner_sphere)
+    outer_cell = openmc.Cell(cell_id=2, fill=steel, region=+inner_sphere & -outer_sphere)
     
     # Universe and geometry
     root = openmc.Universe(cells=[inner_cell, outer_cell])

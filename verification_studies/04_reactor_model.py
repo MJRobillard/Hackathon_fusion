@@ -174,32 +174,32 @@ def create_demo_geometry(R0=900.0):
     
     # 1. Plasma
     plasma_region = -torus_plasma & +z_min & -z_max
-    plasma_cell = openmc.Cell(name='plasma', fill=plasma, region=plasma_region)
+    plasma_cell = openmc.Cell(cell_id=1, name='plasma', fill=plasma, region=plasma_region)
     
     # 2. First wall (tungsten)
     fw_region = +torus_plasma & -torus_first_wall & +z_min & -z_max
-    fw_cell = openmc.Cell(name='first_wall', fill=tungsten, region=fw_region)
+    fw_cell = openmc.Cell(cell_id=2, name='first_wall', fill=tungsten, region=fw_region)
     
     # 3. Inboard blanket (thinner, lower enrichment, r < R0)
     blanket_ib_region = (+torus_first_wall & -torus_blanket_ob & 
                          -cyl_separating & +z_min & -z_max)
-    blanket_ib_cell = openmc.Cell(name='blanket_inboard', fill=blanket_ib, 
+    blanket_ib_cell = openmc.Cell(cell_id=3, name='blanket_inboard', fill=blanket_ib, 
                                    region=blanket_ib_region)
     
     # 4. Outboard blanket (thicker, higher enrichment, r > R0)
     blanket_ob_region = (+torus_first_wall & -torus_blanket_ob & 
                          +cyl_separating & +z_min & -z_max)
-    blanket_ob_cell = openmc.Cell(name='blanket_outboard', fill=blanket_ob, 
+    blanket_ob_cell = openmc.Cell(cell_id=4, name='blanket_outboard', fill=blanket_ob, 
                                    region=blanket_ob_region)
     
     # 5. Vacuum vessel
     vessel_region = +torus_blanket_ob & -torus_vessel_outer & +z_min & -z_max
-    vessel_cell = openmc.Cell(name='vacuum_vessel', fill=vessel, region=vessel_region)
+    vessel_cell = openmc.Cell(cell_id=5, name='vacuum_vessel', fill=vessel, region=vessel_region)
     
     # 6. Outer void
     outer_region = (+torus_vessel_outer & -cyl_outer_bound & +cyl_inner_bound & 
                     +z_min & -z_max)
-    outer_cell = openmc.Cell(name='outer_void', region=outer_region)
+    outer_cell = openmc.Cell(cell_id=6, name='outer_void', region=outer_region)
     
     # Create universe and geometry
     root = openmc.Universe(cells=[plasma_cell, fw_cell, blanket_ib_cell, 

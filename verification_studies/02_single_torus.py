@@ -92,15 +92,15 @@ def create_torus_geometry(R0=400.0, r_inner=150.0, r_outer=170.0):
     # Cells
     # Plasma/vacuum region (inside inner torus)
     plasma_region = -inner_torus & +z_min & -z_max
-    plasma_cell = openmc.Cell(name='plasma_vacuum', region=plasma_region)
+    plasma_cell = openmc.Cell(cell_id=1, name='plasma_vacuum', region=plasma_region)
     
     # Steel wall (between inner and outer torus)
     wall_region = +inner_torus & -outer_torus & +z_min & -z_max
-    wall_cell = openmc.Cell(name='steel_wall', fill=steel, region=wall_region)
+    wall_cell = openmc.Cell(cell_id=2, name='steel_wall', fill=steel, region=wall_region)
     
     # Outer vacuum (outside torus, inside bounding box)
     outer_vacuum_region = (+outer_torus & -cyl_outer & +cyl_inner & +z_min & -z_max)
-    outer_vacuum_cell = openmc.Cell(name='outer_vacuum', region=outer_vacuum_region)
+    outer_vacuum_cell = openmc.Cell(cell_id=3, name='outer_vacuum', region=outer_vacuum_region)
     
     # Create universe and geometry
     root = openmc.Universe(cells=[plasma_cell, wall_cell, outer_vacuum_cell])

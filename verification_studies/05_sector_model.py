@@ -168,23 +168,23 @@ def create_sector_geometry(R0=600.0, sector_angle_deg=20.0):
     
     # Plasma
     plasma_region = -torus_plasma & base_region
-    plasma_cell = openmc.Cell(name='plasma', region=plasma_region)
+    plasma_cell = openmc.Cell(cell_id=1, name='plasma', region=plasma_region)
     
     # First wall
     fw_region = +torus_plasma & -torus_first_wall & base_region
-    fw_cell = openmc.Cell(name='first_wall', fill=tungsten, region=fw_region)
+    fw_cell = openmc.Cell(cell_id=2, name='first_wall', fill=tungsten, region=fw_region)
     
     # Blanket
     blanket_region = +torus_first_wall & -torus_blanket & base_region
-    blanket_cell = openmc.Cell(name='blanket', fill=blanket, region=blanket_region)
+    blanket_cell = openmc.Cell(cell_id=3, name='blanket', fill=blanket, region=blanket_region)
     
     # Vacuum vessel
     vessel_region = +torus_blanket & -torus_vessel & base_region
-    vessel_cell = openmc.Cell(name='vessel', fill=steel, region=vessel_region)
+    vessel_cell = openmc.Cell(cell_id=4, name='vessel', fill=steel, region=vessel_region)
     
     # Outer void
     outer_region = +torus_vessel & base_region
-    outer_cell = openmc.Cell(name='outer_void', region=outer_region)
+    outer_cell = openmc.Cell(cell_id=5, name='outer_void', region=outer_region)
     
     # Create geometry
     root = openmc.Universe(cells=[plasma_cell, fw_cell, blanket_cell, 

@@ -140,23 +140,23 @@ def create_multi_layer_torus(R0=400.0):
     # Define cells for each layer
     # Plasma region
     plasma_region = -torus_plasma & +z_min & -z_max
-    plasma_cell = openmc.Cell(name='plasma', region=plasma_region)
+    plasma_cell = openmc.Cell(cell_id=1, name='plasma', region=plasma_region)
     
     # First wall (tungsten)
     fw_region = +torus_plasma & -torus_first_wall & +z_min & -z_max
-    fw_cell = openmc.Cell(name='first_wall', fill=tungsten, region=fw_region)
+    fw_cell = openmc.Cell(cell_id=2, name='first_wall', fill=tungsten, region=fw_region)
     
     # Breeding blanket
     blanket_region = +torus_first_wall & -torus_blanket & +z_min & -z_max
-    blanket_cell = openmc.Cell(name='blanket', fill=blanket, region=blanket_region)
+    blanket_cell = openmc.Cell(cell_id=3, name='blanket', fill=blanket, region=blanket_region)
     
     # Vacuum vessel
     vessel_region = +torus_blanket & -torus_vessel & +z_min & -z_max
-    vessel_cell = openmc.Cell(name='vessel', fill=steel, region=vessel_region)
+    vessel_cell = openmc.Cell(cell_id=4, name='vessel', fill=steel, region=vessel_region)
     
     # Outer void
     outer_region = (+torus_vessel & -cyl_outer & +cyl_inner & +z_min & -z_max)
-    outer_cell = openmc.Cell(name='outer_void', region=outer_region)
+    outer_cell = openmc.Cell(cell_id=5, name='outer_void', region=outer_region)
     
     # Create universe and geometry
     root = openmc.Universe(cells=[plasma_cell, fw_cell, blanket_cell, 
