@@ -326,10 +326,11 @@ def create_integral_tallies():
     tallies.append(energy_dep)
     
     # 7. Coarse mesh for visualization (lower resolution for speed)
-    mesh = openmc.CylindricalMesh()
-    mesh.r_grid = np.linspace(0, 1400, 15)  # Coarse radial
-    mesh.phi_grid = np.linspace(0, 2*np.pi, 13)  # Coarse toroidal
-    mesh.z_grid = np.linspace(-400, 400, 11)  # Coarse vertical
+    mesh = openmc.CylindricalMesh(
+        r_grid=np.linspace(0, 1400, 15),  # Coarse radial
+        phi_grid=np.linspace(0, 2*np.pi, 13),  # Coarse toroidal
+        z_grid=np.linspace(-400, 400, 11)  # Coarse vertical
+    )
     
     mesh_filter = openmc.MeshFilter(mesh)
     

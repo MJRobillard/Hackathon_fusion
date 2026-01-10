@@ -281,10 +281,11 @@ def create_tallies():
     tallies.append(multiplication_tally)
     
     # Mesh tally for spatial distribution
-    mesh = openmc.CylindricalMesh()
-    mesh.r_grid = np.linspace(0, 700, 36)
-    mesh.phi_grid = np.linspace(0, 2*np.pi, 25)
-    mesh.z_grid = np.linspace(-300, 300, 31)
+    mesh = openmc.CylindricalMesh(
+        r_grid=np.linspace(0, 700, 36),
+        phi_grid=np.linspace(0, 2*np.pi, 25),
+        z_grid=np.linspace(-300, 300, 31)
+    )
     
     mesh_filter = openmc.MeshFilter(mesh)
     

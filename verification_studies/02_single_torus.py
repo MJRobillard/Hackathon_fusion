@@ -174,10 +174,11 @@ def create_tallies():
     
     # Mesh tally for spatial distribution
     # Cylindrical mesh is natural for toroidal geometry
-    mesh = openmc.CylindricalMesh()
-    mesh.r_grid = np.linspace(0, 600, 31)  # Radial bins
-    mesh.phi_grid = np.linspace(0, 2*np.pi, 37)  # Toroidal angle
-    mesh.z_grid = np.linspace(-250, 250, 26)  # Vertical bins
+    mesh = openmc.CylindricalMesh(
+        r_grid=np.linspace(0, 600, 31),  # Radial bins
+        phi_grid=np.linspace(0, 2*np.pi, 37),  # Toroidal angle
+        z_grid=np.linspace(-250, 250, 26)  # Vertical bins
+    )
     
     mesh_filter = openmc.MeshFilter(mesh)
     

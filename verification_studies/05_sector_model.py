@@ -289,10 +289,11 @@ def create_tallies(sector_angle_deg):
     
     # 5. Efficient mesh tally (cylindrical, coarse)
     # Only need to mesh the sector, not full 360°
-    mesh = openmc.CylindricalMesh()
-    mesh.r_grid = np.linspace(0, 950, 20)  # Radial
-    mesh.phi_grid = np.linspace(0, np.deg2rad(sector_angle_deg), 11)  # Sector only!
-    mesh.z_grid = np.linspace(-300, 300, 16)  # Vertical
+    mesh = openmc.CylindricalMesh(
+        r_grid=np.linspace(0, 950, 20),  # Radial
+        phi_grid=np.linspace(0, np.deg2rad(sector_angle_deg), 11),  # Sector only!
+        z_grid=np.linspace(-300, 300, 16)  # Vertical
+    )
     
     mesh_filter = openmc.MeshFilter(mesh)
     
