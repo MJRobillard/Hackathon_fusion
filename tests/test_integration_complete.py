@@ -105,7 +105,7 @@ class TestCompleteIntegration:
         assert 0.5 < result["keff"] < 2.0
         assert result["keff_std"] > 0
         
-        print(f"\n✓ Complete integration test passed")
+        print(f"\n[OK] Complete integration test passed")
         print(f"  Run ID: {result['run_id']}")
         print(f"  k-eff: {result['keff']:.5f} +/- {result['keff_std']:.5f}")
         print(f"  Spec hash: {result['spec_hash'][:12]}...")
@@ -161,7 +161,7 @@ class TestCompleteIntegration:
         assert len(results) == 5
         assert all(r["status"] == "completed" for r in results)
         
-        print(f"\n✓ Parameter sweep test passed")
+        print(f"\n[OK] Parameter sweep test passed")
         print(f"  Completed {len(results)} runs")
         for i, (enr, res) in enumerate(zip(enrichments, results)):
             print(f"  {enr}%: k-eff = {res['keff']:.5f}")
@@ -250,7 +250,7 @@ class TestCompleteIntegration:
             assert stored_summary is not None
             assert stored_summary["keff"] == result["keff"]
             
-            print(f"\n✓ MongoDB storage test passed")
+            print(f"\n[OK] MongoDB storage test passed")
             print(f"  Stored run: {result['run_id']}")
             print(f"  Collections: runs, summaries")
             
@@ -282,7 +282,7 @@ class TestCompleteIntegration:
         assert result["status"] == "failed"
         assert "error" in result
         
-        print(f"\n✓ Error handling test passed")
+        print(f"\n[OK] Error handling test passed")
         print(f"  Error detected: {result['error'][:50]}...")
 
 

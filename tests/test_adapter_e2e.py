@@ -74,7 +74,7 @@ class TestAdapterTranslation:
         assert study.geometry.type == "script"
         assert "pincell_geometry.py" in study.geometry.script
         
-        print(f"✓ Translation test passed")
+        print(f"[OK] Translation test passed")
         print(f"  Study hash: {study.get_short_hash()}")
         print(f"  Materials: {list(study.materials.keys())}")
     
@@ -106,7 +106,7 @@ class TestAdapterTranslation:
             assert abs(enrichment_ratio - expected_ratio) < 0.001, \
                 f"Enrichment mismatch for {enrichment}%"
         
-        print(f"✓ Enrichment variation test passed")
+        print(f"[OK] Enrichment variation test passed")
     
     def test_material_detection(self):
         """Test material name variations."""
@@ -143,7 +143,7 @@ class TestAdapterTranslation:
                 assert expected_mat in study.materials, \
                     f"Expected material '{expected_mat}' not found for {case['materials']}"
         
-        print(f"✓ Material detection test passed")
+        print(f"[OK] Material detection test passed")
     
     def test_spec_hashing_consistency(self):
         """Test that same specs produce same hash."""
@@ -185,7 +185,7 @@ class TestAdapterTranslation:
         
         assert hash1 == hash2, "Identical specs should produce identical hashes"
         
-        print(f"✓ Spec hashing consistency test passed")
+        print(f"[OK] Spec hashing consistency test passed")
 
 
 class TestAdapterBundleCreation:
@@ -236,7 +236,7 @@ class TestAdapterBundleCreation:
         assert manifest["run_id"] == "test_bundle"
         assert manifest["spec_hash"] == spec_hash
         
-        print(f"✓ Bundle creation test passed")
+        print(f"[OK] Bundle creation test passed")
         print(f"  Run directory: {run_dir}")
         print(f"  Spec hash: {spec_hash[:12]}...")
     
@@ -280,7 +280,7 @@ class TestAdapterBundleCreation:
             settings_xml = f.read()
             assert "<?xml version" in settings_xml
         
-        print(f"✓ XML generation test passed")
+        print(f"[OK] XML generation test passed")
 
 
 class TestAdapterWithMongoDB:
@@ -353,7 +353,7 @@ class TestAdapterWithMongoDB:
         assert stored_study is not None
         assert stored_study["spec_hash"] == spec_hash
         
-        print(f"✓ MongoDB integration test passed")
+        print(f"[OK] MongoDB integration test passed")
 
 
 class TestEndToEndExecution:
@@ -425,7 +425,7 @@ class TestEndToEndExecution:
                     assert "run_id" in result
                     assert "spec_hash" in result
         
-        print(f"✓ Mock execution test passed")
+        print(f"[OK] Mock execution test passed")
         print(f"  k-eff: {result['keff']:.5f} +/- {result['keff_std']:.5f}")
     
     @pytest.mark.skipif(
@@ -457,7 +457,7 @@ class TestEndToEndExecution:
             assert result["keff_std"] > 0
             assert result["runtime_seconds"] > 0
             
-            print(f"✓ Real execution test passed")
+            print(f"[OK] Real execution test passed")
             print(f"  k-eff: {result['keff']:.5f} +/- {result['keff_std']:.5f}")
             print(f"  Runtime: {result['runtime_seconds']:.2f} seconds")
             
@@ -498,7 +498,7 @@ class TestConvenienceFunction:
             assert result["status"] == "completed"
             assert "keff" in result
         
-        print(f"✓ Convenience function test passed")
+        print(f"[OK] Convenience function test passed")
 
 
 def run_all_tests():
