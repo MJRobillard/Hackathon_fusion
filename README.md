@@ -21,6 +21,9 @@ aonp/
 ├── core/            # Core utilities
 │   ├── bundler.py   # Creates canonical run bundles
 │   └── extractor.py # Post-processing (H5 → Parquet)
+├── db/              # MongoDB persistence layer
+│   ├── mongo.py     # Database operations
+│   └── README.md    # Database documentation
 ├── runner/          # Execution logic
 │   ├── entrypoint.py # OpenMC simulation runner
 │   └── Dockerfile    # Container environment
@@ -54,6 +57,13 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 pip install openmc  # Only works on Linux/macOS
+
+# Configure MongoDB (create .env file)
+echo "MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/" >> .env
+echo "MONGODB_DB=aonp_db" >> .env
+
+# Initialize MongoDB indexes
+python scripts/init_db.py
 ```
 
 ### Installation (Windows - WSL)
@@ -241,11 +251,13 @@ pytest tests/
 - **Run Bundles**: Self-contained execution directories with provenance
 - **Result Extraction**: HDF5 → Parquet for efficient storage
 - **REST API**: Validate and trigger simulations
+- **MongoDB Integration**: Durable run state, audit logging, multi-worker coordination
 - **Docker Support**: Reproducible execution environment
 
 ### 🚧 Roadmap
 
-- [ ] SQLite/PostgreSQL result database
+- [x] MongoDB result database with audit logging
+- [ ] Agent-based workflow coordination (LangGraph)
 - [ ] Tally specification in YAML
 - [ ] Distributed execution (Celery/Ray)
 - [ ] Web UI for study management
@@ -276,8 +288,37 @@ This manifest links all results to their exact input, enabling:
 ## 📚 Documentation
 
 - **Schemas**: See `aonp/schemas/` for data models
+- **Database**: See `aonp/db/README.md` for MongoDB schema and usage
 - **API Docs**: Visit `/docs` when server is running
 - **Examples**: Check `aonp/examples/` for sample studies
+
+### MongoDB Setup
+
+The platform uses MongoDB for durable state tracking, audit logging, and multi-worker coordination. See `aonp/db/README.md` for full documentation.
+
+Quick start:
+
+```bash
+# 1. Set up MongoDB Atlas (free tier available)
+#    https://www.mongodb.com/cloud/atlas/register
+
+# 2. Configure .env file
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/
+MONGODB_DB=aonp_db
+
+# 3. Initialize database
+python scripts/init_db.py
+
+# 4. Test connection
+python scripts/test_db.py
+```
+
+Collections:
+- **studies**: Deduplicated study specifications (by spec_hash)
+- **runs**: Run execution state (OpenMC phases + worker coordination)
+- **summaries**: k-eff results and metrics
+- **events**: Append-only audit log
+- **agent_outputs**: Optional agent data storage
 
 ## 🤝 Contributing
 
