@@ -13,14 +13,17 @@ Runs independently from the agent system.
 
 import os
 import sys
+import re
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from uuid import uuid4
+import asyncio
+import json
 
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
@@ -28,6 +31,9 @@ from dotenv import load_dotenv
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from openmc_adapter import OpenMCAdapter
+from aonp.core.bundler import create_run_bundle
+from aonp.runner.streaming_runner import StreamingSimulationRunner
+from aonp.core.extractor import extract_results
 
 load_dotenv()
 
@@ -40,6 +46,286 @@ API_HOST = os.getenv("OPENMC_API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("OPENMC_API_PORT", 8001))
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 RUNS_DIR = Path(os.getenv("OPENMC_RUNS_DIR", "runs"))
+
+# ============================================================================
+# STREAMING: RUN EVENT BUS
+# ============================================================================
+
+
+class RunEventBus:
+    """Simple pub/sub for OpenMC run streaming events (SSE)."""
+
+    def __init__(self):
+        self._subscribers: Dict[str, List[asyncio.Queue]] = {}
+
+    def subscribe(self, run_id: str) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue()
+        self._subscribers.setdefault(run_id, []).append(queue)
+        return queue
+
+    async def publish(self, run_id: str, event: dict):
+        if run_id in self._subscribers:
+            for queue in list(self._subscribers[run_id]):
+                await queue.put(event)
+
+    async def complete(self, run_id: str):
+        if run_id in self._subscribers:
+            for queue in list(self._subscribers[run_id]):
+                await queue.put(None)
+
+    def unsubscribe(self, run_id: str, queue: asyncio.Queue):
+        if run_id in self._subscribers:
+            self._subscribers[run_id].remove(queue)
+            if not self._subscribers[run_id]:
+                del self._subscribers[run_id]
+
+
+run_event_bus = RunEventBus()
+
+
+class RunEventPublisher:
+    """Thread-safe publisher for run events from sync code."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, run_id: str):
+        self.loop = loop
+        self.run_id = run_id
+
+    def _emit(self, event_type: str, data: dict):
+        payload = {
+            "type": event_type,
+            "run_id": self.run_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **data,
+        }
+        asyncio.run_coroutine_threadsafe(run_event_bus.publish(self.run_id, payload), self.loop)
+
+    def log_line(self, line: str):
+        self._emit("openmc_log", {"content": line})
+
+    def tool_call(self, tool_name: str, message: str, args: Dict[str, Any]):
+        self._emit(
+            "tool_call",
+            {
+                "agent": "OpenMC",
+                "tool_name": tool_name,
+                "message": message,
+                "args": args,
+            },
+        )
+
+    def tool_result(self, tool_name: str, result: Dict[str, Any]):
+        self._emit(
+            "tool_result",
+            {
+                "agent": "OpenMC",
+                "tool_name": tool_name,
+                "result": result,
+            },
+        )
+
+    def agent_blip(self, agent: str, content: str, metadata: Optional[Dict[str, Any]] = None):
+        """Emit an agent-style blip as an SSE event."""
+        self._emit(
+            "agent_thinking",
+            {
+                "agent": agent,
+                "content": content,
+                "metadata": metadata or {},
+            },
+        )
+
+
+_BATCH_LINE_RE = re.compile(
+    r"^\s*(?P<batch>\d+)\s*/\s*(?P<total>\d+)\s+(?P<keff>-?\d+\.\d+)\s*\+/-\s*(?P<keff_std>\d+\.\d+)"
+)
+
+
+def _stream_execute_openmc(
+    spec_dict: Dict[str, Any],
+    run_id: str,
+    publisher: RunEventPublisher,
+) -> Dict[str, Any]:
+    """
+    Execute OpenMC using the streaming runner and publish:
+    - raw log lines (openmc_log)
+    - parsed progress tool events (tool_call)
+    - final result event (tool_result)
+    """
+    # Create full spec + bundle
+    study = adapter.translate_simple_to_openmc(spec_dict, run_id)
+    run_dir, spec_hash = create_run_bundle(study=study, run_id=run_id, base_dir=RUNS_DIR)
+
+    outputs_dir = run_dir / "outputs"
+    outputs_dir.mkdir(exist_ok=True)
+    log_path = outputs_dir / "openmc_stdout.log"
+
+    publisher.tool_call(
+        tool_name="openmc.run",
+        message="Starting OpenMC run (streaming stdout)",
+        args={"run_id": run_id, "spec_hash": spec_hash, "spec": spec_dict, "run_dir": str(run_dir)},
+    )
+
+    last_batch: Optional[int] = None
+    total_batches: Optional[int] = None
+    last_keff: Optional[float] = None
+    last_keff_std: Optional[float] = None
+
+    runner = StreamingSimulationRunner(run_dir)
+    with open(log_path, "a", encoding="utf-8") as log_f:
+        for line in runner.stream_simulation():
+            # Ensure each line ends with newline for the UI/terminal
+            if line and not line.endswith("\n"):
+                line = line + "\n"
+
+            log_f.write(line)
+            log_f.flush()
+
+            publisher.log_line(line)
+
+            m = _BATCH_LINE_RE.match(line)
+            if m:
+                batch = int(m.group("batch"))
+                total = int(m.group("total"))
+                keff = float(m.group("keff"))
+                keff_std = float(m.group("keff_std"))
+
+                total_batches = total
+                if last_batch != batch:
+                    publisher.tool_call(
+                        tool_name="openmc.batch_progress",
+                        message=f"Batch {batch}/{total} — k-eff {keff:.5f} ± {keff_std:.5f}",
+                        args={
+                            "batch": batch,
+                            "total_batches": total,
+                            "keff": keff,
+                            "keff_std": keff_std,
+                            "progress_pct": round(100.0 * batch / max(1, total), 2),
+                        },
+                    )
+                    last_batch = batch
+                    last_keff = keff
+                    last_keff_std = keff_std
+
+    # Extract results (statepoint moved to outputs/ by runner)
+    statepoint_files = sorted(outputs_dir.glob("statepoint.*.h5"))
+    if not statepoint_files:
+        result = {
+            "status": "failed",
+            "error": "No statepoint file found after OpenMC run",
+            "run_id": run_id,
+            "spec_hash": spec_hash,
+            "run_dir": str(run_dir),
+        }
+        publisher.tool_result("openmc.run", result)
+        return {**result, "keff": 0.0, "keff_std": 0.0, "runtime_seconds": 0.0}
+
+    extracted = extract_results(statepoint_files[-1])
+
+    # Runtime from manifest (written by StreamingSimulationRunner)
+    runtime_seconds = 0.0
+    manifest_path = run_dir / "run_manifest.json"
+    if manifest_path.exists():
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            runtime_seconds = float(manifest.get("runtime_seconds", 0.0) or 0.0)
+        except Exception:
+            runtime_seconds = 0.0
+
+    final = {
+        "status": "completed",
+        "run_id": run_id,
+        "spec_hash": spec_hash,
+        "run_dir": str(run_dir),
+        "keff": extracted.get("keff", last_keff or 0.0),
+        "keff_std": extracted.get("keff_std", last_keff_std or 0.0),
+        "uncertainty_pcm": (extracted.get("keff_std", last_keff_std or 0.0) or 0.0) * 1e5,
+        "runtime_seconds": runtime_seconds,
+        "log_path": str(log_path),
+        "total_batches": total_batches,
+    }
+
+    publisher.tool_result("openmc.run", final)
+    return final
+
+
+def _make_compare_blip(current: Dict[str, Any], baseline: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create a short, user-facing comparison blip between current and baseline runs.
+    """
+    cur_keff = float(current.get("keff", 0.0) or 0.0)
+    cur_std = float(current.get("keff_std", 0.0) or 0.0)
+    base_keff = float(baseline.get("keff", 0.0) or 0.0)
+    base_std = float(baseline.get("keff_std", 0.0) or 0.0)
+
+    delta = cur_keff - base_keff
+    # combined 1-sigma (assuming independence)
+    combined = (cur_std**2 + base_std**2) ** 0.5 if (cur_std or base_std) else None
+    delta_pcm = delta * 1e5
+    z = (delta / combined) if (combined and combined > 0) else None
+
+    direction = "higher" if delta > 0 else "lower" if delta < 0 else "about the same"
+    sig_text = ""
+    if z is not None:
+        sig_text = f" (~{abs(z):.1f}σ)"
+
+    summary = (
+        f"Compared to {baseline.get('run_id')}, this run’s k-eff is {direction} by {delta_pcm:+.1f} pcm{sig_text} "
+        f"({cur_keff:.5f} ± {cur_std:.5f} vs {base_keff:.5f} ± {base_std:.5f})."
+    )
+
+    return {
+        "baseline_run_id": baseline.get("run_id"),
+        "delta_keff": delta,
+        "delta_pcm": delta_pcm,
+        "combined_std": combined,
+        "z_score": z,
+        "summary": summary,
+    }
+
+
+def _suggest_next_experiment(spec_dict: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Simple heuristic suggestion to run another experiment with a different input.
+    """
+    geometry = spec_dict.get("geometry")
+    enrichment = spec_dict.get("enrichment_pct")
+    temperature = spec_dict.get("temperature_K")
+    particles = spec_dict.get("particles")
+    batches = spec_dict.get("batches")
+
+    # Prefer a parameter nudge: enrichment up/down, else increase particles for uncertainty reduction.
+    suggestion = {
+        "prompt": "Try another run with a different input to see if we can improve k-eff.",
+        "candidate_inputs": [],
+    }
+
+    if isinstance(enrichment, (int, float)):
+        step = 0.5
+        suggestion["candidate_inputs"].append({**spec_dict, "enrichment_pct": round(float(enrichment) + step, 3)})
+        suggestion["candidate_inputs"].append({**spec_dict, "enrichment_pct": max(0.0, round(float(enrichment) - step, 3))})
+        suggestion["prompt"] = f"Next experiment: sweep enrichment around {enrichment}% (e.g., {enrichment - step}% and {enrichment + step}%)."
+    elif isinstance(temperature, (int, float)):
+        stepT = 50.0
+        suggestion["candidate_inputs"].append({**spec_dict, "temperature_K": round(float(temperature) + stepT, 1)})
+        suggestion["candidate_inputs"].append({**spec_dict, "temperature_K": max(0.0, round(float(temperature) - stepT, 1))})
+        suggestion["prompt"] = f"Next experiment: vary temperature by ±{int(stepT)} K to see sensitivity."
+    else:
+        # fallback: reduce uncertainty
+        if isinstance(particles, int):
+            suggestion["candidate_inputs"].append({**spec_dict, "particles": int(particles * 2)})
+        if isinstance(batches, int):
+            suggestion["candidate_inputs"].append({**spec_dict, "batches": int(batches + 20)})
+        suggestion["prompt"] = "Next experiment: increase particles/batches to reduce uncertainty and confirm the trend."
+
+    suggestion["context"] = {
+        "geometry": geometry,
+        "current_run_id": current.get("run_id"),
+        "current_keff": current.get("keff"),
+        "current_keff_std": current.get("keff_std"),
+    }
+    return suggestion
+
 
 # ============================================================================
 # PYDANTIC MODELS
@@ -290,19 +576,14 @@ async def execute_simulation_background(
                 {"run_id": run_id},
                 {"$set": {"status": "running", "started_at": datetime.now(timezone.utc)}}
             )
-        
+
         # Execute simulation (runs in thread pool since it's synchronous)
-        import asyncio
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            adapter.execute_real_openmc,
-            spec_dict,
-            run_id
-        )
+        publisher = RunEventPublisher(loop=loop, run_id=run_id)
+        result = await loop.run_in_executor(None, _stream_execute_openmc, spec_dict, run_id, publisher)
         
         # Calculate additional metrics
-        uncertainty_pcm = result['keff_std'] * 1e5
+        uncertainty_pcm = result.get('keff_std', 0.0) * 1e5
         
         # Update database
         if mongodb:
@@ -334,6 +615,51 @@ async def execute_simulation_background(
                     "created_at": datetime.now(timezone.utc),
                     "spec": spec_dict
                 })
+
+        # Compare Agent blip (best-effort)
+        if mongodb and result.get("status") == "completed":
+            try:
+                # Find a relevant baseline: most recent completed run with same geometry (excluding current)
+                geom = spec_dict.get("geometry")
+                baseline = await mongodb.openmc_runs.find_one(
+                    {
+                        "run_id": {"$ne": run_id},
+                        "status": "completed",
+                        "spec.geometry": geom,
+                        "keff": {"$exists": True},
+                        "keff_std": {"$exists": True},
+                    },
+                    sort=[("completed_at", -1)],
+                )
+                if baseline:
+                    compare = _make_compare_blip(
+                        current={"run_id": run_id, **result},
+                        baseline={
+                            "run_id": baseline.get("run_id"),
+                            "keff": baseline.get("keff"),
+                            "keff_std": baseline.get("keff_std"),
+                        },
+                    )
+                    # Emit as a tool_result so the UI shows it in the "tool events" feed
+                    publisher.tool_result("compare_runs", compare)
+                    # Also emit a short agent blip
+                    publisher.agent_blip("Compare Agent", compare["summary"], {"baseline_run_id": compare["baseline_run_id"]})
+            except Exception as e:
+                publisher.agent_blip("Compare Agent", f"Comparison unavailable: {e}", {})
+
+        # After 10 seconds: prompt another experiment
+        if result.get("status") == "completed":
+            await asyncio.sleep(10.0)
+            suggestion = _suggest_next_experiment(spec_dict, result)
+            publisher.agent_blip("Compare Agent", suggestion["prompt"], {"candidates": suggestion.get("candidate_inputs", [])[:2]})
+            publisher.tool_call(
+                tool_name="suggest_next_experiment",
+                message=suggestion["prompt"],
+                args={"candidates": suggestion.get("candidate_inputs", [])[:2]},
+            )
+
+        # Signal stream completion (after the delayed prompt)
+        await run_event_bus.complete(run_id)
         
     except Exception as e:
         print(f"❌ Background execution failed for {run_id}: {e}")
@@ -351,6 +677,18 @@ async def execute_simulation_background(
                     }
                 }
             )
+
+        # Publish error + complete stream
+        await run_event_bus.publish(
+            run_id,
+            {
+                "type": "openmc_error",
+                "run_id": run_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "error": str(e),
+            },
+        )
+        await run_event_bus.complete(run_id)
 
 
 # ============================================================================
@@ -410,6 +748,69 @@ async def submit_simulation(
         status="queued",
         submitted_at=submitted_at,
         estimated_duration_seconds=max(5, estimated_duration)
+    )
+
+
+@app.get("/api/v1/simulations/{run_id}/stream")
+async def stream_simulation_output(run_id: str):
+    """
+    Stream OpenMC run output and parsed progress events via SSE.
+
+    Events include:
+    - openmc_log: raw stdout lines
+    - tool_call: interpreted progress/tool-style events
+    - tool_result: final summary
+    - openmc_error: error details (if any)
+    """
+    run_dir = RUNS_DIR / run_id
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Run directory not found for {run_id}")
+
+    async def event_generator():
+        queue = run_event_bus.subscribe(run_id)
+
+        # Replay recent log tail (best-effort)
+        log_path = run_dir / "outputs" / "openmc_stdout.log"
+        if log_path.exists():
+            try:
+                with open(log_path, "r", encoding="utf-8") as f:
+                    tail = f.readlines()[-200:]
+                for line in tail:
+                    event = {
+                        "type": "openmc_log",
+                        "run_id": run_id,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "content": line,
+                    }
+                    yield f"event: openmc_log\n"
+                    yield f"data: {json.dumps(event)}\n\n"
+            except Exception:
+                pass
+
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+
+                if event is None:
+                    break
+
+                yield f"event: {event['type']}\n"
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            run_event_bus.unsubscribe(run_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

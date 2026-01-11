@@ -12,6 +12,7 @@ Schema:
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Literal, Dict, List
 
@@ -25,7 +26,12 @@ from pymongo.database import Database
 load_dotenv()
 
 MONGODB_URI = os.getenv("MONGODB_URI")
-MONGODB_DB = os.getenv("MONGODB_DB", "aonp_db")
+
+# Important safety default:
+# - In normal usage, default to "aonp_db"
+# - Under pytest (collection/runtime), default to an isolated "aonp_test" unless explicitly overridden
+_DEFAULT_DB_NAME = "aonp_test" if "pytest" in sys.modules else "aonp_db"
+MONGODB_DB = os.getenv("MONGODB_DB", _DEFAULT_DB_NAME)
 
 if not MONGODB_URI:
     raise RuntimeError("Missing MONGODB_URI in environment/.env")

@@ -110,18 +110,42 @@ export function useEventStream(queryId: string | null) {
     eventSource.addEventListener('tool_call', (e) => {
       const data = JSON.parse(e.data);
       addLog('TOOL', `${data.tool_name} - ${data.message || 'Executing...'}`);
+      // Show exactly what the agent passed to the tool (args) in Agent Reasoning
+      addThought(
+        data.agent || 'System',
+        'tool_call',
+        data.message || `Calling tool ${data.tool_name}`,
+        {
+          tool_name: data.tool_name,
+          args: data.args,
+        }
+      );
     });
 
     eventSource.addEventListener('tool_result', (e) => {
       const data = JSON.parse(e.data);
       addLog('TOOL', `✓ ${data.tool_name} completed`, 'success');
-      addThought(data.agent || 'System', 'observation', `Tool ${data.tool_name} returned results`, data.result);
+      addThought(
+        data.agent || 'System',
+        'observation',
+        data.message || `Tool ${data.tool_name} returned results`,
+        {
+          tool_name: data.tool_name,
+          result: data.result,
+        }
+      );
     });
 
     // New: Agent thinking events
     eventSource.addEventListener('agent_thinking', (e) => {
       const data = JSON.parse(e.data);
-      addThought(data.agent, 'thinking', data.content, data.metadata);
+      // Back-compat: some backends embed a more specific subtype in `data.type`
+      const subtype = (data?.type as AgentThought['type'] | undefined) || 'thinking';
+      const normalized: AgentThought['type'] =
+        subtype === 'observation' || subtype === 'planning' || subtype === 'decision' || subtype === 'tool_call'
+          ? subtype
+          : 'thinking';
+      addThought(data.agent, normalized, data.content, data.metadata);
     });
 
     eventSource.addEventListener('agent_decision', (e) => {
@@ -133,6 +157,12 @@ export function useEventStream(queryId: string | null) {
     eventSource.addEventListener('agent_planning', (e) => {
       const data = JSON.parse(e.data);
       addThought(data.agent, 'planning', data.content, data.metadata);
+    });
+
+    // New: explicit observation events (preferred over stuffing subtype into agent_thinking)
+    eventSource.addEventListener('agent_observation', (e) => {
+      const data = JSON.parse(e.data);
+      addThought(data.agent, 'observation', data.content, data.metadata);
     });
 
     eventSource.addEventListener('query_complete', (e) => {

@@ -57,6 +57,10 @@ export function StatusFooter({
         <span>TOKEN CONSUMPTION: {tokenConsumption}k/min</span>
         <span className="text-gray-500">|</span>
         <span>EST: {eta}</span>
+        <span className="text-gray-500">|</span>
+        <a href="https://mjrobillard.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-gray-200 transition-colors">mjrobillard.com</a>
+        <span className="text-gray-500">|</span>
+        <a href="https://dare-tech.vercel.app/" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-gray-200 transition-colors">dare-tech</a>
       </div>
     </footer>
   );

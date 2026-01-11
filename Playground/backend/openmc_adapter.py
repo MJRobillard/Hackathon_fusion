@@ -16,7 +16,7 @@ from aonp.schemas.study import (
     SettingsSpec, NuclearDataSpec, SourceSpec
 )
 from aonp.core.bundler import create_run_bundle
-from aonp.runner.entrypoint import run_simulation
+import aonp.runner.entrypoint as runner_entrypoint
 from aonp.core.extractor import extract_results
 
 
@@ -267,7 +267,7 @@ class OpenMCAdapter:
             )
             
             # Step 3: Execute simulation
-            exit_code = run_simulation(run_dir)
+            exit_code = runner_entrypoint.run_simulation(run_dir)
             
             if exit_code != 0:
                 return {

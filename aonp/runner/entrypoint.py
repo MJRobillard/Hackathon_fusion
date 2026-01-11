@@ -8,9 +8,19 @@ import sys
 import time
 import json
 from pathlib import Path
+import secrets
+
+from aonp.agents.rerun_prompting_agent import generate_rerun_suggestion
+from aonp.core.bundler import create_run_bundle
+from aonp.schemas.study import StudySpec
 
 
-def run_simulation(run_dir: Path) -> int:
+def _env_truthy(name: str, default: str = "0") -> bool:
+    val = os.getenv(name, default).strip().lower()
+    return val in {"1", "true", "yes", "y", "on"}
+
+
+def run_simulation(run_dir: Path, *, enable_rerun_agent: bool = True) -> int:
     """
     Execute OpenMC simulation in the specified run directory.
     
@@ -112,6 +122,59 @@ def run_simulation(run_dir: Path) -> int:
             json.dump(manifest, f, indent=2)
         
         print(f"\n[OK] Results written to: {outputs_dir}")
+
+        # Post-run rerun suggestion (best-effort; non-fatal)
+        try:
+            suggestion = generate_rerun_suggestion(run_dir) if enable_rerun_agent else None
+            if suggestion:
+                manifest["rerun_suggestion"] = suggestion
+                with open(manifest_path, "w") as f:
+                    json.dump(manifest, f, indent=2)
+                yaml_path = suggestion.get("suggested_study_spec_yaml")
+                print("\n" + "-" * 60)
+                print("Rerun suggestion (via Fireworks) saved.")
+                if yaml_path:
+                    print(f"Suggested next input: {yaml_path}")
+                if suggestion.get("changes"):
+                    print("Suggested changes:")
+                    for c in suggestion["changes"]:
+                        print(f"  - {c}")
+
+                # Optional: auto-rerun once using the suggested spec
+                if _env_truthy("AONP_AUTO_RERUN", "0"):
+                    try:
+                        suggested_json = suggestion.get("suggested_study_spec_json")
+                        if suggested_json and Path(suggested_json).exists():
+                            suggested_spec = json.loads(Path(suggested_json).read_text(encoding="utf-8"))
+                            suggested_study = StudySpec(**suggested_spec)
+                            new_run_id = f"{manifest['run_id']}__rerun_{secrets.token_hex(3)}"
+                            new_run_dir, _ = create_run_bundle(
+                                suggested_study,
+                                run_id=new_run_id,
+                                base_dir=run_dir.parent,
+                            )
+                            # Mark provenance link
+                            new_manifest_path = new_run_dir / "run_manifest.json"
+                            if new_manifest_path.exists():
+                                nm = json.loads(new_manifest_path.read_text(encoding="utf-8"))
+                                nm["rerun_of"] = manifest["run_id"]
+                                new_manifest_path.write_text(json.dumps(nm, indent=2), encoding="utf-8")
+
+                            print(f"\n[OK] Auto-rerun starting: {new_run_id}")
+                            # Prevent infinite chains: do not generate another suggestion on the rerun
+                            run_simulation(new_run_dir, enable_rerun_agent=False)
+                        else:
+                            print("[WARN] Auto-rerun skipped: suggested spec json not found")
+                    except Exception as e:
+                        print(f"[WARN] Auto-rerun failed: {e}")
+                else:
+                    print("To auto-run the suggestion next time, set AONP_AUTO_RERUN=1")
+                print("-" * 60)
+            else:
+                # If missing key or call failed, don't spam logs unless user asked for it
+                pass
+        except Exception as e:
+            print(f"[WARN] Rerun suggestion failed: {e}")
         
         return 0
         
@@ -124,6 +187,30 @@ def run_simulation(run_dir: Path) -> int:
         
         with open(manifest_path, 'w') as f:
             json.dump(manifest, f, indent=2)
+
+        # Even on failure, try to propose a safer next input (best-effort; non-fatal)
+        try:
+            suggestion = (
+                generate_rerun_suggestion(
+                    run_dir,
+                    objective="Fix the failure and improve the chance of a successful run.",
+                )
+                if enable_rerun_agent
+                else None
+            )
+            if suggestion:
+                manifest["rerun_suggestion"] = suggestion
+                with open(manifest_path, "w") as f:
+                    json.dump(manifest, f, indent=2)
+                yaml_path = suggestion.get("suggested_study_spec_yaml")
+                print("\n" + "-" * 60)
+                print("Rerun suggestion (via Fireworks) saved (after failure).")
+                if yaml_path:
+                    print(f"Suggested next input: {yaml_path}")
+                print("To auto-run the suggestion next time, set AONP_AUTO_RERUN=1")
+                print("-" * 60)
+        except Exception:
+            pass
         
         return 1
 

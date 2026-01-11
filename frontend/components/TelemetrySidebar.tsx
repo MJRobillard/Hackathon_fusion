@@ -1,11 +1,18 @@
 'use client';
 
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiService } from '@/lib/api';
+import { BatchConvergenceChart } from './BatchConvergenceChart';
+import type { BatchConvergenceData } from '@/lib/types';
+
 interface TelemetryMetrics {
   keff?: number;
   keff_std?: number;
   convergenceRate?: number;
   iteration?: number;
   totalIterations?: number;
+  run_id?: string;
   interlocks?: {
     geometryCheck: 'passed' | 'failed' | 'pending';
     crossSection: 'passed' | 'failed' | 'pending';
@@ -176,6 +183,15 @@ const defaultMetrics: TelemetryMetrics = {
 };
 
 export function TelemetrySidebar({ metrics = defaultMetrics }: TelemetrySidebarProps) {
+  const [showConvergence, setShowConvergence] = useState(false);
+
+  // Fetch batch convergence data if we have a run_id
+  const { data: convergenceData, isLoading: convergenceLoading } = useQuery({
+    queryKey: ['visualization', 'run', metrics?.run_id],
+    queryFn: () => apiService.getRunVisualization(metrics!.run_id!),
+    enabled: !!metrics?.run_id && showConvergence,
+  });
+
   return (
     <div className="w-72 h-full bg-[#0A0B0D] border-l border-[#1F2937] flex flex-col overflow-y-auto">
       {/* Header */}
@@ -249,6 +265,38 @@ export function TelemetrySidebar({ metrics = defaultMetrics }: TelemetrySidebarP
             </div>
           </div>
         </div>
+
+        {/* Batch Convergence Toggle */}
+        {metrics?.run_id && (
+          <div className="p-4 bg-[#14161B] border border-[#1F2937] rounded">
+            <button
+              onClick={() => setShowConvergence(!showConvergence)}
+              className="w-full text-left text-xs text-gray-400 hover:text-gray-200 transition-colors flex items-center justify-between"
+            >
+              <span>Batch Convergence</span>
+              <span className="text-gray-600">{showConvergence ? '▼' : '▶'}</span>
+            </button>
+            {showConvergence && (
+              <div className="mt-3">
+                {convergenceLoading ? (
+                  <div className="text-[10px] text-gray-500 py-4 text-center">Loading...</div>
+                ) : convergenceData && convergenceData.type === 'batch_convergence' ? (
+                  <div className="scale-75 origin-top-left w-[133%] h-[400px] overflow-hidden">
+                    <BatchConvergenceChart
+                      data={convergenceData.data as BatchConvergenceData}
+                      width={360}
+                      height={400}
+                    />
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-gray-500 py-4 text-center">
+                    No convergence data available
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Export Button */}
         <button className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded transition-colors flex items-center justify-center gap-2">

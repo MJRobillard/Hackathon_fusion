@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MissionControlTopBar } from '@/components/MissionControlTopBar';
-import { RunsSidebar } from '@/components/RunsSidebar';
+import { ToolAgentConfigSidebar } from '@/components/ToolAgentConfigSidebar';
 import { AgentPanel } from '@/components/AgentPanel';
 import { MissionControlLogs } from '@/components/MissionControlLogs';
 import { TelemetrySidebar } from '@/components/TelemetrySidebar';
@@ -11,10 +11,12 @@ import { StatusFooter } from '@/components/StatusFooter';
 import { CommandPalette } from '@/components/CommandPalette';
 import { DatabasePanel } from '@/components/DatabasePanel';
 import { HealthPanel } from '@/components/HealthPanel';
+import { AgentThinkingPanel } from '@/components/AgentThinkingPanel';
 import RAGCopilotPanel from '@/components/RAGCopilotPanel';
 import RAGAgentCard from '@/components/RAGAgentCard';
 import GlobalTerminal from '@/components/GlobalTerminal';
 import OpenMCBackendPanel from '@/components/OpenMCBackendPanel';
+import { AnalyticsPanel } from '@/components/AnalyticsPanel';
 import { useEventStream } from '@/hooks/useEventStream';
 import { useQueryHistory } from '@/hooks/useQueryHistory';
 import { apiService } from '@/lib/api';
@@ -28,7 +30,11 @@ export default function Home() {
   const [showDatabase, setShowDatabase] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
   const [showRAGPanel, setShowRAGPanel] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
   const [terminalMode, setTerminalMode] = useState<'stream' | 'openmc'>('stream');
+  const [showAgentThinking, setShowAgentThinking] = useState(false);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const queryClient = useQueryClient();
 
   const { queries, addQuery, updateQuery, getQuery } = useQueryHistory();
@@ -60,8 +66,15 @@ export default function Home() {
   useEffect(() => {
     if (activeQueryData && activeQueryId) {
       updateQuery(activeQueryId, activeQueryData);
+      // Auto-select run_id from results if available
+      if (activeQueryData.results?.run_id && !selectedRunId) {
+        setSelectedRunId(activeQueryData.results.run_id);
+      }
+      if (activeQueryData.results?.run_ids && selectedRunIds.length === 0) {
+        setSelectedRunIds(activeQueryData.results.run_ids);
+      }
     }
-  }, [activeQueryData, activeQueryId, updateQuery]);
+  }, [activeQueryData, activeQueryId, updateQuery, selectedRunId, selectedRunIds]);
 
   // Submit query mutation
   const submitMutation = useMutation({
@@ -216,6 +229,7 @@ export default function Home() {
       convergenceRate: 75,
       iteration: activeQuery.results.batches || 42,
       totalIterations: 100,
+      run_id: activeQuery.results.run_id,
       interlocks: {
         geometryCheck: 'passed' as const,
         crossSection: 'passed' as const,
@@ -263,12 +277,8 @@ export default function Home() {
 
       {/* Main Content Grid */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar: Runs */}
-        <RunsSidebar
-          runs={runs.length > 0 ? runs : undefined}
-          activeRunId={activeQueryId?.substring(0, 8).toUpperCase()}
-          onSelectRun={handleSelectQuery}
-        />
+        {/* Left Sidebar: Tool & Agent Config */}
+        <ToolAgentConfigSidebar />
 
         {/* Center Panel */}
         <div className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
@@ -278,6 +288,22 @@ export default function Home() {
               agents={agents}
               currentTask={activeQuery?.query || 'Waiting for command...'}
             />
+
+            {/* Agent thinking / tool calls */}
+            <div className="px-2">
+              <button
+                onClick={() => setShowAgentThinking((v) => !v)}
+                className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                {showAgentThinking ? '▾ Hide agent reasoning' : '▸ Show agent reasoning'}
+              </button>
+            </div>
+
+            {showAgentThinking && (
+              <div className="px-2 h-64">
+                <AgentThinkingPanel thoughts={agentThoughts} autoScroll={true} />
+              </div>
+            )}
 
             {/* RAG Copilot Indicator */}
             {activeQuery?.routing?.agent === 'rag_copilot' && (
@@ -335,14 +361,17 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Right Sidebar: Telemetry / RAG Toggle */}
-        <div className="flex flex-col border-l border-gray-800 bg-[#0F1115]" style={{ width: showRAGPanel ? '800px' : '360px' }}>
+        {/* Right Sidebar: Telemetry / Analytics / RAG Toggle */}
+        <div className="flex flex-col border-l border-gray-800 bg-[#0F1115]" style={{ width: showRAGPanel ? '800px' : showAnalytics ? '600px' : '360px' }}>
           {/* Toggle Tabs */}
           <div className="flex border-b border-gray-800 bg-[#0A0B0D]">
             <button
-              onClick={() => setShowRAGPanel(false)}
+              onClick={() => {
+                setShowRAGPanel(false);
+                setShowAnalytics(false);
+              }}
               className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
-                !showRAGPanel
+                !showRAGPanel && !showAnalytics
                   ? 'text-blue-400 border-b-2 border-blue-400 bg-[#0F1115]'
                   : 'text-gray-500 hover:text-gray-300'
               }`}
@@ -350,7 +379,23 @@ export default function Home() {
               📊 Telemetry
             </button>
             <button
-              onClick={() => setShowRAGPanel(true)}
+              onClick={() => {
+                setShowRAGPanel(false);
+                setShowAnalytics(true);
+              }}
+              className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
+                showAnalytics
+                  ? 'text-emerald-400 border-b-2 border-emerald-400 bg-[#0F1115]'
+                  : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              📈 Analytics
+            </button>
+            <button
+              onClick={() => {
+                setShowRAGPanel(true);
+                setShowAnalytics(false);
+              }}
               className={`flex-1 px-4 py-2 text-xs font-medium transition-colors ${
                 showRAGPanel
                   ? 'text-purple-400 border-b-2 border-purple-400 bg-[#0F1115]'
@@ -367,6 +412,18 @@ export default function Home() {
               <RAGCopilotPanel
                 queryId={activeQueryId || undefined}
                 activeQuery={activeQuery?.query}
+              />
+            ) : showAnalytics ? (
+              <AnalyticsPanel
+                activeRunId={selectedRunId || activeQuery?.results?.run_id}
+                selectedRunIds={selectedRunIds.length > 0 ? selectedRunIds : (activeQuery?.results?.run_ids || [])}
+                onRunSelect={(runId: string) => {
+                  setSelectedRunId(runId);
+                  setShowAnalytics(true);
+                }}
+                onRunIdsChange={(runIds: string[]) => {
+                  setSelectedRunIds(runIds);
+                }}
               />
             ) : (
               <TelemetrySidebar metrics={telemetry} />

@@ -1,0 +1,16 @@
+{
+  "run_id": "run_10fe442a7d56",
+  "spec_hash": "882edfe2019ef5446bc9f0d4995271ac71adcd720c0786fb6a296191a5e8bf6f",
+  "timestamp": "2026-01-11T19:46:00.280274Z",
+  "schema_version": "0.1.0",
+  "openmc_version": "0.15.3",
+  "python_version": "3.13.11",
+  "status": "completed",
+  "runtime_seconds": 8.177671432495117,
+  "error": null,
+  "nuclear_data_library": null,
+  "cross_sections_path": null,
+  "rerun_suggestion": {
+    "raw_text_path": "/home/ratth/projects/Hackathon_fusion/Hackathon_fusion/Playground/backend/api/runs_openmc/run_10fe442a7d56/rerun_suggestion.raw.txt"
+  }
+}

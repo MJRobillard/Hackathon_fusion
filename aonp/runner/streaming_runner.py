@@ -13,6 +13,12 @@ from typing import Generator, Optional
 import asyncio
 from threading import Thread
 import queue
+import os
+import secrets
+
+from aonp.agents.rerun_prompting_agent import generate_rerun_suggestion
+from aonp.core.bundler import create_run_bundle
+from aonp.schemas.study import StudySpec
 
 
 class StreamingSimulationRunner:
@@ -20,11 +26,16 @@ class StreamingSimulationRunner:
     Executes OpenMC simulation and captures stdout line-by-line for streaming.
     """
     
-    def __init__(self, run_dir: Path):
+    def __init__(self, run_dir: Path, *, enable_rerun_agent: bool = True):
         self.run_dir = Path(run_dir)
         self.inputs_dir = self.run_dir / "inputs"
         self.outputs_dir = self.run_dir / "outputs"
         self.manifest_path = self.run_dir / "run_manifest.json"
+        self.enable_rerun_agent = enable_rerun_agent
+
+    def _env_truthy(self, name: str, default: str = "0") -> bool:
+        val = os.getenv(name, default).strip().lower()
+        return val in {"1", "true", "yes", "y", "on"}
         
     def validate_setup(self) -> tuple[bool, Optional[str]]:
         """Validate directory structure and manifest."""
@@ -180,6 +191,61 @@ openmc.run(cwd="{self.inputs_dir}", output=True)
             self.save_manifest(manifest)
             
             yield f"\n[OK] Results written to: {self.outputs_dir}\n"
+
+            # Post-run rerun suggestion (best-effort, non-fatal)
+            try:
+                suggestion = generate_rerun_suggestion(self.run_dir) if self.enable_rerun_agent else None
+                if suggestion:
+                    manifest["rerun_suggestion"] = suggestion
+                    self.save_manifest(manifest)
+                    yaml_path = suggestion.get("suggested_study_spec_yaml")
+                    yield "\n" + "-" * 60 + "\n"
+                    yield "Rerun suggestion (via Fireworks) saved.\n"
+                    if yaml_path:
+                        yield f"Suggested next input: {yaml_path}\n"
+                    if suggestion.get("changes"):
+                        yield "Suggested changes:\n"
+                        for c in suggestion["changes"]:
+                            yield f"  - {c}\n"
+
+                    # Optional: auto-rerun once using the suggested spec (streamed)
+                    if self._env_truthy("AONP_AUTO_RERUN", "0"):
+                        try:
+                            suggested_json = suggestion.get("suggested_study_spec_json")
+                            if suggested_json and Path(suggested_json).exists():
+                                suggested_spec = json.loads(Path(suggested_json).read_text(encoding="utf-8"))
+                                suggested_study = StudySpec(**suggested_spec)
+                                new_run_id = f"{manifest['run_id']}__rerun_{secrets.token_hex(3)}"
+                                new_run_dir, _ = create_run_bundle(
+                                    suggested_study,
+                                    run_id=new_run_id,
+                                    base_dir=self.run_dir.parent,
+                                )
+                                # Mark provenance link
+                                new_manifest_path = new_run_dir / "run_manifest.json"
+                                if new_manifest_path.exists():
+                                    nm = json.loads(new_manifest_path.read_text(encoding="utf-8"))
+                                    nm["rerun_of"] = manifest["run_id"]
+                                    new_manifest_path.write_text(json.dumps(nm, indent=2), encoding="utf-8")
+
+                                yield f"\n[OK] Auto-rerun starting: {new_run_id}\n"
+                                yield "\n" + "=" * 60 + "\n"
+                                yield "AUTO-RERUN STREAM\n"
+                                yield "=" * 60 + "\n\n"
+
+                                # Prevent infinite chains: do not generate another suggestion on the rerun
+                                rerun_runner = StreamingSimulationRunner(new_run_dir, enable_rerun_agent=False)
+                                for line in rerun_runner.stream_simulation():
+                                    yield line
+                            else:
+                                yield "[WARN] Auto-rerun skipped: suggested spec json not found\n"
+                        except Exception as e:
+                            yield f"[WARN] Auto-rerun failed: {e}\n"
+                    else:
+                        yield "To auto-run the suggestion next time, set AONP_AUTO_RERUN=1\n"
+                    yield "-" * 60 + "\n"
+            except Exception as e:
+                yield f"[WARN] Rerun suggestion failed/skipped: {e}\n"
             
         except subprocess.TimeoutExpired:
             yield "\n[ERROR] Simulation timed out\n"
@@ -191,6 +257,29 @@ openmc.run(cwd="{self.inputs_dir}", output=True)
             manifest['status'] = 'failed'
             manifest['error'] = str(e)
             self.save_manifest(manifest)
+
+            # Even on failure, try to propose a safer next input (best-effort)
+            try:
+                suggestion = (
+                    generate_rerun_suggestion(
+                        self.run_dir,
+                        objective="Fix the failure and improve the chance of a successful run.",
+                    )
+                    if self.enable_rerun_agent
+                    else None
+                )
+                if suggestion:
+                    manifest["rerun_suggestion"] = suggestion
+                    self.save_manifest(manifest)
+                    yaml_path = suggestion.get("suggested_study_spec_yaml")
+                    yield "\n" + "-" * 60 + "\n"
+                    yield "Rerun suggestion (via Fireworks) saved (after failure).\n"
+                    if yaml_path:
+                        yield f"Suggested next input: {yaml_path}\n"
+                    yield "To auto-run the suggestion next time, set AONP_AUTO_RERUN=1\n"
+                    yield "-" * 60 + "\n"
+            except Exception:
+                pass
 
 
 async def async_stream_simulation(run_dir: Path) -> Generator[str, None, None]:

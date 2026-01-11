@@ -50,6 +50,7 @@ class StudySpec(BaseModel):
     temperature_K: Optional[float] = None
     particles: int = 10000
     batches: int = 50
+    inactive: Optional[int] = None
     
     def canonical_json_bytes(self) -> bytes:
         """Deterministic JSON serialization for hashing"""
@@ -192,7 +193,10 @@ def real_openmc_execution(spec: StudySpec, run_id: str) -> Dict[str, Any]:
             # Settings
             settings = openmc.Settings()
             settings.batches = spec.batches
-            settings.inactive = min(10, spec.batches // 5)
+            if spec.inactive is not None:
+                settings.inactive = int(spec.inactive)
+            else:
+                settings.inactive = min(10, spec.batches // 5)
             settings.particles = spec.particles
             settings.run_mode = 'eigenvalue'
             
@@ -670,6 +674,20 @@ def validate_physics(spec: Dict[str, Any]) -> Dict[str, Any]:
         batches = spec["batches"]
         if batches < 10:
             validation["warnings"].append(f"Few batches ({batches}) - statistics may be poor")
+
+    if "inactive" in spec and spec["inactive"] is not None:
+        try:
+            inactive = int(spec["inactive"])
+            batches = int(spec.get("batches", 0) or 0)
+            if inactive < 0:
+                validation["valid"] = False
+                validation["errors"].append(f"Inactive batches {inactive} cannot be negative")
+            elif batches and inactive >= batches:
+                validation["valid"] = False
+                validation["errors"].append(f"Inactive batches {inactive} must be < total batches {batches}")
+        except Exception:
+            validation["valid"] = False
+            validation["errors"].append("Inactive batches must be an integer")
     
     # Validate materials
     if "materials" in spec:

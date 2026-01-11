@@ -25,6 +25,8 @@ from agent_tools import (
     validate_physics
 )
 
+from orchestration_config import get_orchestration_config
+
 load_dotenv()
 
 # ============================================================================
@@ -36,6 +38,26 @@ llm = ChatFireworks(
     model="accounts/robillard-matthew22/deployedModels/nvidia-nemotron-nano-9b-v2-nsoeqcp4",
     temperature=0.7
 )
+
+# ============================================================================
+# HELPERS (lightweight, UI-friendly “agentic trace”)
+# ============================================================================
+
+def _truncate(s: str, n: int = 1200) -> str:
+    if s is None:
+        return ""
+    s = str(s)
+    return s if len(s) <= n else (s[: n - 3] + "...")
+
+
+def _serialize_messages(messages: List[BaseMessage]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for m in messages:
+        role = getattr(m, "type", m.__class__.__name__)
+        content = _truncate(getattr(m, "content", ""))
+        out.append({"role": role, "content": content})
+    return out
+
 
 # ============================================================================
 # ROUTER AGENT
@@ -52,7 +74,7 @@ class RouterAgent:
     - analysis: Analyze/compare specific runs
     """
     
-    def __init__(self, use_llm: bool = True):
+    def __init__(self, use_llm: bool = True, thinking_callback=None):
         """
         Initialize Router Agent
         
@@ -61,6 +83,7 @@ class RouterAgent:
         """
         self.llm = llm
         self.use_llm = use_llm
+        self.thinking_callback = thinking_callback
     
     def _keyword_route(self, query: str) -> Dict[str, Any]:
         """
@@ -143,10 +166,21 @@ class RouterAgent:
             }
         """
         print(f"\n[ROUTER] Analyzing query: {query[:60]}...")
+        if self.thinking_callback:
+            self.thinking_callback.thinking(
+                "Router",
+                f"Analyzing query: '{query}'",
+                {
+                    "query_length": len(query),
+                    "goal": "Classify intent and route to the best specialist agent (studies/sweep/query/analysis)",
+                },
+            )
         
         # Use keyword routing if LLM is disabled
         if not self.use_llm:
             print(f"[ROUTER] Using keyword-based routing (LLM disabled)")
+            if self.thinking_callback:
+                self.thinking_callback.planning("Router", "Using keyword-based routing (LLM disabled)", {"method": "keyword"})
             return self._keyword_route(query)
         
         # Try LLM routing
@@ -167,6 +201,20 @@ Respond with ONLY the category name, nothing else."""
         
         try:
             # Call LLM
+            if self.thinking_callback:
+                self.thinking_callback.planning(
+                    "Router",
+                    "Using LLM-based routing",
+                    {
+                        "method": "llm",
+                        "llm_input": {
+                            "purpose": "intent_classification",
+                            "model": getattr(self.llm, "model", None),
+                            "temperature": getattr(self.llm, "temperature", None),
+                            "messages": _serialize_messages(messages),
+                        },
+                    },
+                )
             response = self.llm.invoke(messages)
             raw_response = response.content.strip()
             print(f"[ROUTER] Raw LLM response: '{raw_response}'")
@@ -174,6 +222,12 @@ Respond with ONLY the category name, nothing else."""
             # Clean up response
             intent = raw_response.lower().replace('"', '').replace("'", "").replace(".", "").strip()
             print(f"[ROUTER] Cleaned intent: '{intent}'")
+            if self.thinking_callback:
+                self.thinking_callback.observation(
+                    "Router",
+                    "LLM routing output received; normalizing to known intents",
+                    {"raw_response": raw_response, "normalized_intent": intent},
+                )
             
             # Map intent to agent
             intent_to_agent = {
@@ -210,8 +264,38 @@ Respond with ONLY the category name, nothing else."""
                     intent = "single_study"
                     agent = "studies"
                     confidence = 0.5
+
+            if self.thinking_callback:
+                self.thinking_callback.thinking(
+                    "Router",
+                    "Sanity-checking the selected intent against visible query signals (to avoid misroutes)",
+                    {"selected_intent": intent, "selected_agent": agent},
+                )
             
             print(f"[ROUTER] Final: Intent='{intent}' → Agent='{agent}' (confidence={confidence})")
+            if self.thinking_callback:
+                # UI-friendly, high-level rationale (not chain-of-thought)
+                signals: List[str] = []
+                ql = query.lower()
+                if any(k in ql for k in ["compare", "sweep", "vary", "range", "from", "to", "between", "multiple"]):
+                    signals.append("contains sweep/comparison language")
+                if any(k in ql for k in ["show", "list", "find", "search", "recent", "statistics", "stats"]):
+                    signals.append("contains query/history language")
+                if "run_" in ql and any(k in ql for k in ["compare", "analyze", "analysis"]):
+                    signals.append("mentions explicit run ids for analysis")
+                if any(k in ql for k in ["simulate", "pin cell", "assembly", "enrichment", "temperature", "particles", "batches"]):
+                    signals.append("contains simulation configuration language")
+                self.thinking_callback.decision(
+                    "Router",
+                    f"Routed to {agent} ({intent})",
+                    {
+                        "intent": intent,
+                        "agent": agent,
+                        "confidence": confidence,
+                        "method": "llm",
+                        "signals": signals,
+                    },
+                )
             
             return {
                 "agent": agent,
@@ -226,6 +310,8 @@ Respond with ONLY the category name, nothing else."""
             # Handle LLM errors gracefully - fall back to keyword routing
             print(f"[ROUTER ERROR] LLM invocation failed: {e}")
             print(f"[ROUTER] Falling back to keyword-based routing")
+            if self.thinking_callback:
+                self.thinking_callback.decision("Router", "LLM routing failed; falling back to keyword routing", {"error": str(e)})
             
             result = self._keyword_route(query)
             result["error"] = str(e)
@@ -237,6 +323,77 @@ Respond with ONLY the category name, nothing else."""
 # STUDIES AGENT
 # ============================================================================
 
+class RetryAgent:
+    """
+    Retry Agent: chooses a rerun coefficient + updated particles/batches when a run
+    needs better statistics (e.g., convergence loop).
+    """
+
+    def __init__(self, thinking_callback=None):
+        self.thinking_callback = thinking_callback
+
+    def choose_rerun_params(
+        self,
+        *,
+        objective: str,
+        uncertainty_pcm: float,
+        target_uncertainty_pcm: float,
+        current_particles: int,
+        current_batches: int,
+        max_particles: int,
+        max_batches: int,
+        batches_step: int,
+        particles_min_step: int,
+    ) -> Dict[str, Any]:
+        if self.thinking_callback:
+            self.thinking_callback.thinking(
+                "Retry Agent",
+                "Self-check: what should my goals be for the rerun, and what coefficient should I use?",
+                {
+                    "question": "What are my goals for the rerun?",
+                    "objective": objective,
+                    "primary_goal": "Reduce statistical uncertainty in k-eff",
+                    "secondary_goals": ["Keep runtime bounded", "Stay within max particles/batches"],
+                },
+            )
+
+        # Heuristic: uncertainty ~ 1/sqrt(N) => need ~ (ratio^2) more histories
+        ratio = float(uncertainty_pcm) / float(target_uncertainty_pcm) if target_uncertainty_pcm > 0 else 1.0
+        # "coefficient" showcased in UI (human-friendly)
+        coef = min(3.0, max(1.15, ratio))
+
+        if self.thinking_callback:
+            self.thinking_callback.planning(
+                "Retry Agent",
+                "Computing rerun coefficient from uncertainty ratio (aim: bring uncertainty under target)",
+                {"uncertainty_pcm": uncertainty_pcm, "target_uncertainty_pcm": target_uncertainty_pcm, "ratio": ratio, "coefficient": coef},
+            )
+
+        # Scale particles more aggressively than batches (simple and explainable)
+        proposed_particles = int(max(current_particles + particles_min_step, round(current_particles * (coef**2))))
+        proposed_batches = int(max(current_batches + batches_step, round(current_batches * coef)))
+
+        next_particles = min(max_particles, proposed_particles)
+        next_batches = min(max_batches, proposed_batches)
+
+        if self.thinking_callback:
+            self.thinking_callback.decision(
+                "Retry Agent",
+                f"Rerun coefficient={coef:.2f} → particles={next_particles}, batches={next_batches}",
+                {
+                    "coefficient": coef,
+                    "current_particles": current_particles,
+                    "current_batches": current_batches,
+                    "proposed_particles": proposed_particles,
+                    "proposed_batches": proposed_batches,
+                    "next_particles": next_particles,
+                    "next_batches": next_batches,
+                },
+            )
+
+        return {"coefficient": coef, "particles": next_particles, "batches": next_batches}
+
+
 class StudiesAgent:
     """
     Studies Agent: Handles single simulation requests
@@ -247,8 +404,9 @@ class StudiesAgent:
     - validate_physics
     """
     
-    def __init__(self):
+    def __init__(self, thinking_callback=None):
         self.llm = llm
+        self.thinking_callback = thinking_callback
         self.tools = {
             "submit_study": submit_study,
             "get_run_by_id": get_run_by_id,
@@ -268,11 +426,38 @@ class StudiesAgent:
         print(f"\n[STUDIES AGENT] Executing single study...")
         
         query = context.get("query", "")
+        query_lower = query.lower()
+        wants_convergence = any(k in query_lower for k in ["converge", "convergence", "until it converges"])
+        objective = (
+            "Estimate k-eff with sufficiently low uncertainty (and stable delta between iterations)"
+            if not any(k in query_lower for k in ["critical", "keff=1", "k-eff=1", "k=1"])
+            else "Reach/assess criticality (k-eff ≈ 1) with sufficiently low uncertainty"
+        )
+        cfg = get_orchestration_config()
+        # Default convergence targets (runtime configurable)
+        target_uncertainty_pcm = cfg.convergence.target_uncertainty_pcm
+        stable_delta_pcm = cfg.convergence.stable_delta_pcm
+        max_iterations = cfg.convergence.max_iterations
+        max_particles = cfg.convergence.max_particles
+        max_batches = cfg.convergence.max_batches
+        batches_step = cfg.convergence.batches_step
+        particles_min_step = cfg.convergence.particles_min_step
+        
+        if self.thinking_callback:
+            self.thinking_callback.planning(
+                "Studies Agent",
+                "Extracting simulation spec from query",
+                {"wants_convergence": wants_convergence, "objective": objective},
+            )
         
         # Step 1: Extract study specification
         spec = self._extract_spec(query)
+        if self.thinking_callback:
+            self.thinking_callback.observation("Studies Agent", "Extracted simulation parameters", {"spec": spec})
         
         # Step 2: Validate physics
+        if self.thinking_callback:
+            self.thinking_callback.tool_call("Studies Agent", "validate_physics", spec)
         validation = validate_physics(spec)
         if not validation["valid"]:
             return {
@@ -280,39 +465,172 @@ class StudiesAgent:
                 "error": f"Invalid physics: {validation['errors']}",
                 "warnings": validation["warnings"]
             }
+        if self.thinking_callback and validation.get("warnings"):
+            self.thinking_callback.observation("Studies Agent", "Physics validation warnings", {"warnings": validation["warnings"]})
         
-        # Step 3: Submit study
+        # Step 3: Submit study (optionally iterate until converged)
         try:
-            result = submit_study(spec)
+            if not wants_convergence:
+                if self.thinking_callback:
+                    self.thinking_callback.tool_call("Studies Agent", "submit_study", spec)
+                result = submit_study(spec)
+                if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+                    self.thinking_callback.tool_result("Studies Agent", "submit_study", result)
+                if self.thinking_callback:
+                    self.thinking_callback.observation(
+                        "Studies Agent",
+                        f"Run complete: k-eff {result['keff']:.5f} ± {result['keff_std']:.6f}",
+                        {"run_id": result["run_id"], **result},
+                    )
+                
+                return {
+                    "status": "success",
+                    "run_id": result["run_id"],
+                    "keff": result["keff"],
+                    "keff_std": result["keff_std"],
+                    "spec": spec,
+                    "warnings": validation["warnings"]
+                }
             
+            # Convergence loop
+            runs: List[Dict[str, Any]] = []
+            current_spec = dict(spec)
+            
+            if self.thinking_callback:
+                self.thinking_callback.planning(
+                    "Studies Agent",
+                    "Convergence requested; will iterate runs until uncertainty stabilizes / drops below target",
+                    {"target_uncertainty_pcm": target_uncertainty_pcm, "max_iterations": max_iterations, "objective": objective},
+                )
+            
+            for i in range(max_iterations):
+                iter_label = f"iter_{i+1}"
+                if self.thinking_callback:
+                    self.thinking_callback.tool_call(
+                        "Studies Agent",
+                        "submit_study",
+                        {
+                            **current_spec,
+                            "iteration": i + 1,
+                            "orchestration": {
+                                "reason": "convergence_loop",
+                                "targets": {
+                                    "target_uncertainty_pcm": target_uncertainty_pcm,
+                                    "stable_delta_pcm": stable_delta_pcm,
+                                },
+                            },
+                        },
+                    )
+                
+                result = submit_study(current_spec)
+                if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+                    self.thinking_callback.tool_result("Studies Agent", "submit_study", result)
+                uncertainty_pcm = float(result["keff_std"]) * 1e5
+                
+                run_rec = {
+                    "iteration": i + 1,
+                    "run_id": result["run_id"],
+                    "keff": result["keff"],
+                    "keff_std": result["keff_std"],
+                    "uncertainty_pcm": uncertainty_pcm,
+                    "spec": dict(current_spec),
+                }
+                runs.append(run_rec)
+                
+                if self.thinking_callback:
+                    self.thinking_callback.observation(
+                        "Studies Agent",
+                        f"[{i+1}/{max_iterations}] k-eff {result['keff']:.5f} ± {result['keff_std']:.6f} ({uncertainty_pcm:.0f} pcm)",
+                        run_rec,
+                    )
+                
+                # Check convergence
+                delta_pcm = None
+                if len(runs) >= 2:
+                    delta_pcm = (runs[-1]["keff"] - runs[-2]["keff"]) * 1e5
+                
+                converged = (uncertainty_pcm <= target_uncertainty_pcm) and (
+                    delta_pcm is None or abs(delta_pcm) <= stable_delta_pcm
+                )
+                
+                if converged:
+                    if self.thinking_callback:
+                        self.thinking_callback.decision(
+                            "Studies Agent",
+                            "Converged: uncertainty and k-eff change are within targets",
+                            {"uncertainty_pcm": uncertainty_pcm, "delta_pcm": delta_pcm},
+                        )
+                    break
+                
+                # Adjust parameters for next iteration
+                particles = int(current_spec.get("particles", 10000) or 10000)
+                batches = int(current_spec.get("batches", 50) or 50)
+
+                retry_agent = RetryAgent(thinking_callback=self.thinking_callback)
+                retry = retry_agent.choose_rerun_params(
+                    objective=objective,
+                    uncertainty_pcm=uncertainty_pcm,
+                    target_uncertainty_pcm=target_uncertainty_pcm,
+                    current_particles=particles,
+                    current_batches=batches,
+                    max_particles=max_particles,
+                    max_batches=max_batches,
+                    batches_step=batches_step,
+                    particles_min_step=particles_min_step,
+                )
+
+                current_spec["particles"] = int(retry["particles"])
+                current_spec["batches"] = int(retry["batches"])
+
+                if self.thinking_callback:
+                    self.thinking_callback.planning(
+                        "Studies Agent",
+                        "Not converged yet; applying Retry Agent proposal for next iteration",
+                        {
+                            "retry_coefficient": retry.get("coefficient"),
+                            "next_particles": current_spec["particles"],
+                            "next_batches": current_spec["batches"],
+                            "uncertainty_pcm": uncertainty_pcm,
+                            "delta_pcm": delta_pcm,
+                        },
+                    )
+            
+            # Compare the attempted runs (best-effort)
+            run_ids = [r["run_id"] for r in runs]
+            comparison = None
+            try:
+                if self.thinking_callback:
+                    self.thinking_callback.tool_call("Compare Agent", "compare_runs", {"run_ids": run_ids})
+                comparison = compare_runs(run_ids)
+                if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+                    self.thinking_callback.tool_result("Compare Agent", "compare_runs", comparison)
+            except Exception as e:
+                comparison = {"error": str(e)}
+            
+            best = max(runs, key=lambda r: (r["keff"], -r["keff_std"])) if runs else None
             return {
                 "status": "success",
-                "run_id": result["run_id"],
-                "keff": result["keff"],
-                "keff_std": result["keff_std"],
-                "spec": spec,
-                "warnings": validation["warnings"]
+                "mode": "convergence",
+                "runs": runs,
+                "run_ids": run_ids,
+                "best_run": best,
+                "comparison": comparison,
+                "warnings": validation["warnings"],
             }
         except Exception as e:
-            return {
-                "status": "error",
-                "error": str(e)
-            }
+            if self.thinking_callback:
+                self.thinking_callback.decision("Studies Agent", "Run failed", {"error": str(e)})
+            return {"status": "error", "error": str(e)}
     
     def _extract_spec(self, query: str) -> Dict[str, Any]:
         """Extract study specification from natural language"""
         
-        # First try keyword-based extraction as fallback
+        # Always do keyword extraction to catch explicit config keywords
         try:
-            spec = self._keyword_extract_spec(query)
-            
-            # If keyword extraction found specific values, use it
-            # Otherwise try LLM for better parsing
-            if spec["enrichment_pct"] is not None or spec["temperature_K"] is not None:
-                print(f"[STUDIES AGENT] Using keyword-based spec extraction")
-                return spec
+            kw_spec = self._keyword_extract_spec(query)
         except Exception as e:
             print(f"[STUDIES AGENT] Keyword extraction failed: {e}")
+            kw_spec = None
         
         # Try LLM-based extraction
         system_prompt = """You are a nuclear reactor physics expert.
@@ -325,7 +643,8 @@ Output ONLY valid JSON with this structure:
     "enrichment_pct": float or null,
     "temperature_K": float or null,
     "particles": int (default 10000),
-    "batches": int (default 50)
+    "batches": int (default 50),
+    "inactive": int or null (optional inactive batches)
 }
 
 Use reasonable defaults if not specified. Output JSON only, no explanation."""
@@ -336,6 +655,19 @@ Use reasonable defaults if not specified. Output JSON only, no explanation."""
         ]
         
         try:
+            if self.thinking_callback:
+                self.thinking_callback.planning(
+                    "Studies Agent",
+                    "Calling LLM to extract structured simulation spec (JSON)",
+                    {
+                        "llm_input": {
+                            "purpose": "spec_extraction",
+                            "model": getattr(self.llm, "model", None),
+                            "temperature": getattr(self.llm, "temperature", None),
+                            "messages": _serialize_messages(messages),
+                        }
+                    },
+                )
             response = self.llm.invoke(messages)
             
             content = response.content
@@ -345,12 +677,29 @@ Use reasonable defaults if not specified. Output JSON only, no explanation."""
                 content = content.split("```")[1].split("```")[0]
             
             spec = json.loads(content.strip())
-            print(f"[STUDIES AGENT] Using LLM-based spec extraction")
+            if self.thinking_callback:
+                self.thinking_callback.observation(
+                    "Studies Agent",
+                    "LLM spec parsed successfully; applying explicit keyword overrides where present",
+                    {"llm_output_raw": _truncate(response.content), "parsed_spec": spec},
+                )
+            # Overlay explicit keyword-parsed values (they are the ground truth for config keywords)
+            if kw_spec:
+                for k, v in kw_spec.items():
+                    if v is not None:
+                        spec[k] = v
+            print(f"[STUDIES AGENT] Using LLM-based spec extraction (with keyword overrides)")
             return spec
         except Exception as e:
             print(f"[STUDIES AGENT] LLM extraction failed: {e}, falling back to keyword extraction")
+            if self.thinking_callback:
+                self.thinking_callback.decision(
+                    "Studies Agent",
+                    "LLM spec extraction failed; falling back to keyword extraction",
+                    {"error": str(e)},
+                )
             # Fall back to keyword extraction
-            return self._keyword_extract_spec(query)
+            return kw_spec or self._keyword_extract_spec(query)
     
     def _keyword_extract_spec(self, query: str) -> Dict[str, Any]:
         """
@@ -368,7 +717,8 @@ Use reasonable defaults if not specified. Output JSON only, no explanation."""
             "enrichment_pct": None,
             "temperature_K": None,
             "particles": 10000,
-            "batches": 50
+            "batches": 50,
+            "inactive": None
         }
         
         # Extract geometry
@@ -376,6 +726,19 @@ Use reasonable defaults if not specified. Output JSON only, no explanation."""
             spec["geometry"] = "BWR assembly"
         elif "pwr" in query_lower:
             spec["geometry"] = "PWR pin cell"
+
+        # Extract materials if explicitly mentioned
+        mats = []
+        if "uo2" in query_lower or "uox" in query_lower:
+            mats.append("UO2")
+        if "water" in query_lower or "h2o" in query_lower:
+            mats.append("Water")
+        if "zircaloy" in query_lower or "clad" in query_lower or "zirconium" in query_lower:
+            mats.append("Zircaloy")
+        if mats:
+            # Keep order stable and unique
+            seen = set()
+            spec["materials"] = [m for m in mats if not (m in seen or seen.add(m))]
         
         # Extract enrichment (look for patterns like "4.5%", "4.5 percent", "3% enriched")
         enrichment_patterns = [
@@ -400,6 +763,25 @@ Use reasonable defaults if not specified. Output JSON only, no explanation."""
             if match:
                 spec["temperature_K"] = float(match.group(1))
                 break
+
+        # Extract particles (e.g., "10000 particles")
+        particles_match = re.search(r'(\d{3,})\s*particles', query_lower)
+        if particles_match:
+            spec["particles"] = int(particles_match.group(1))
+
+        # Extract batches (e.g., "200 batches")
+        batches_match = re.search(r'(\d{2,})\s*batches', query_lower)
+        if batches_match:
+            spec["batches"] = int(batches_match.group(1))
+
+        # Extract inactive batches (e.g., "20 inactive", "inactive 20", "20 inactive batches")
+        inactive_match = re.search(r'inactive(?:\s*batches)?[:\s]+(\d{1,4})', query_lower)
+        if inactive_match:
+            spec["inactive"] = int(inactive_match.group(1))
+        else:
+            inactive_match2 = re.search(r'(\d{1,4})\s*inactive(?:\s*batches)?', query_lower)
+            if inactive_match2:
+                spec["inactive"] = int(inactive_match2.group(1))
         
         return spec
 
@@ -418,8 +800,9 @@ class SweepAgent:
     - validate_physics
     """
     
-    def __init__(self):
+    def __init__(self, thinking_callback=None):
         self.llm = llm
+        self.thinking_callback = thinking_callback
         self.tools = {
             "generate_sweep": generate_sweep,
             "compare_runs": compare_runs,
@@ -440,11 +823,17 @@ class SweepAgent:
         print(f"\n[SWEEP AGENT] Executing parameter sweep...")
         
         query = context.get("query", "")
+        if self.thinking_callback:
+            self.thinking_callback.planning("Sweep Agent", "Extracting sweep configuration from query", {"query": _truncate(query, 300)})
         
         # Step 1: Extract sweep configuration
         sweep_config = self._extract_sweep_config(query)
+        if self.thinking_callback:
+            self.thinking_callback.observation("Sweep Agent", "Sweep configuration extracted", {"sweep_config": sweep_config})
         
         # Step 2: Validate base spec
+        if self.thinking_callback:
+            self.thinking_callback.tool_call("Sweep Agent", "validate_physics", sweep_config["base_spec"])
         validation = validate_physics(sweep_config["base_spec"])
         if not validation["valid"]:
             return {
@@ -454,6 +843,16 @@ class SweepAgent:
         
         # Step 3: Generate sweep
         try:
+            if self.thinking_callback:
+                self.thinking_callback.tool_call(
+                    "Sweep Agent",
+                    "generate_sweep",
+                    {
+                        "base_spec": sweep_config["base_spec"],
+                        "param_name": sweep_config["param_name"],
+                        "param_values": sweep_config["param_values"],
+                    },
+                )
             run_ids = generate_sweep(
                 base_spec=sweep_config["base_spec"],
                 param_name=sweep_config["param_name"],
@@ -461,6 +860,8 @@ class SweepAgent:
             )
             
             # Step 4: Compare results
+            if self.thinking_callback:
+                self.thinking_callback.tool_call("Sweep Agent", "compare_runs", {"run_ids": run_ids})
             comparison = compare_runs(run_ids)
             
             return {
@@ -620,8 +1021,9 @@ class QueryAgent:
     - get_recent_runs
     """
     
-    def __init__(self):
+    def __init__(self, thinking_callback=None):
         self.llm = llm
+        self.thinking_callback = thinking_callback
         self.tools = {
             "query_results": query_results,
             "get_study_statistics": get_study_statistics,
@@ -640,17 +1042,31 @@ class QueryAgent:
         print(f"\n[QUERY AGENT] Searching database...")
         
         query = context.get("query", "")
+        if self.thinking_callback:
+            self.thinking_callback.planning("Query Agent", "Parsing query into database filters", {"query": _truncate(query, 300)})
         
         # Step 1: Extract filters from query
         filters = self._extract_filters(query)
+        if self.thinking_callback:
+            self.thinking_callback.observation("Query Agent", "Extracted query filters", {"filters": filters})
         
         # Step 2: Query database
         try:
             if filters.get("recent_only"):
+                if self.thinking_callback:
+                    self.thinking_callback.tool_call("Query Agent", "get_recent_runs", {"limit": filters.get("limit", 10)})
                 results = get_recent_runs(limit=filters.get("limit", 10))
             elif filters.get("statistics_only"):
+                if self.thinking_callback:
+                    self.thinking_callback.tool_call("Query Agent", "get_study_statistics", {})
                 results = get_study_statistics()
             else:
+                if self.thinking_callback:
+                    self.thinking_callback.tool_call(
+                        "Query Agent",
+                        "query_results",
+                        {"filter_params": filters.get("mongo_filter", {}), "limit": filters.get("limit", 10)},
+                    )
                 results = query_results(
                     filter_params=filters.get("mongo_filter", {}),
                     limit=filters.get("limit", 10)
@@ -720,8 +1136,9 @@ class AnalysisAgent:
     - get_run_by_id
     """
     
-    def __init__(self):
+    def __init__(self, thinking_callback=None):
         self.llm = llm
+        self.thinking_callback = thinking_callback
         self.tools = {
             "compare_runs": compare_runs,
             "get_run_by_id": get_run_by_id
@@ -740,9 +1157,13 @@ class AnalysisAgent:
         print(f"\n[ANALYSIS AGENT] Analyzing results...")
         
         query = context.get("query", "")
+        if self.thinking_callback:
+            self.thinking_callback.planning("Analysis Agent", "Extracting run ids and preparing comparison", {"query": _truncate(query, 300)})
         
         # Step 1: Extract run IDs
         run_ids = self._extract_run_ids(query)
+        if self.thinking_callback:
+            self.thinking_callback.observation("Analysis Agent", "Run ids extracted", {"run_ids": run_ids})
         
         if not run_ids:
             return {
@@ -752,6 +1173,8 @@ class AnalysisAgent:
         
         # Step 2: Compare runs
         try:
+            if self.thinking_callback:
+                self.thinking_callback.tool_call("Analysis Agent", "compare_runs", {"run_ids": run_ids})
             comparison = compare_runs(run_ids)
             
             # Step 3: Generate interpretation
@@ -807,10 +1230,10 @@ class MultiAgentOrchestrator:
     Main orchestrator that coordinates all agents
     """
     
-    def __init__(self):
-        self.router = RouterAgent()
+    def __init__(self, thinking_callback=None):
+        self.router = RouterAgent(thinking_callback=thinking_callback)
         self.agents = {
-            "studies": StudiesAgent(),
+            "studies": StudiesAgent(thinking_callback=thinking_callback),
             "sweep": SweepAgent(),
             "query": QueryAgent(),
             "analysis": AnalysisAgent()

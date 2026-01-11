@@ -18,6 +18,14 @@ from datetime import datetime, timezone
 from typing import Callable, Optional, Dict, Any
 import asyncio
 
+import sys
+from pathlib import Path
+
+# Ensure we can import from Playground/backend (parent of api/)
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from orchestration_config import get_orchestration_config  # type: ignore[import-not-found]
+
 
 class AgentThinkingCallback:
     """
@@ -66,21 +74,45 @@ class AgentThinkingCallback:
     
     def tool_call(self, agent: str, tool_name: str, args: Dict[str, Any]):
         """Agent is calling a tool"""
+        cfg = get_orchestration_config()
+        run_id = args.get("run_id") if isinstance(args, dict) else None
+        iteration = args.get("iteration") if isinstance(args, dict) else None
+        msg = cfg.tool_prompts.format_tool_call(
+            tool_name=tool_name,
+            agent=agent,
+            run_id=run_id,
+            iteration=iteration if isinstance(iteration, int) else None,
+        )
         self._emit_async("tool_call", {
             "agent": agent,
             "tool_name": tool_name,
-            "message": f"Calling {tool_name}",
+            "message": msg,
             "args": args
+        })
+
+    def tool_result(self, agent: str, tool_name: str, result: Dict[str, Any]):
+        """Tool finished and returned a result"""
+        cfg = get_orchestration_config()
+        msg = cfg.tool_prompts.format_tool_result(tool_name=tool_name, agent=agent)
+        self._emit_async("tool_result", {
+            "agent": agent,
+            "tool_name": tool_name,
+            "message": msg,
+            "result": result
         })
     
     def observation(self, agent: str, content: str, metadata: Optional[Dict[str, Any]] = None):
         """Agent observed something"""
-        self._emit_async("agent_thinking", {
-            "agent": agent,
-            "type": "observation",
-            "content": content,
-            "metadata": metadata or {}
-        })
+        # Prefer a dedicated event type so the frontend can render OBSERVATION distinctly.
+        # (Older frontends can still treat this similarly to agent_thinking.)
+        self._emit_async(
+            "agent_observation",
+            {
+                "agent": agent,
+                "content": content,
+                "metadata": metadata or {},
+            },
+        )
 
 
 # ============================================================================

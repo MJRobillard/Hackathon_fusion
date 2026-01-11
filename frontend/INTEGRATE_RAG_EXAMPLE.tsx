@@ -4,13 +4,13 @@
 'use client';
 
 import { useState } from 'react';
-import TopBar from '@/components/TopBar';
-import RunsSidebar from '@/components/RunsSidebar';
-import AgentWorkflow from '@/components/AgentWorkflow';
-import ExecutionLogs from '@/components/ExecutionLogs';
-import ResultsPanel from '@/components/ResultsPanel';
-import TelemetrySidebar from '@/components/TelemetrySidebar';
-import StatusFooter from '@/components/StatusFooter';
+import { TopBar } from '@/components/TopBar';
+import { RunsSidebar } from '@/components/RunsSidebar';
+import { AgentWorkflow } from '@/components/AgentWorkflow';
+import { ExecutionLogs } from '@/components/ExecutionLogs';
+import { ResultsPanel } from '@/components/ResultsPanel';
+import { TelemetrySidebar } from '@/components/TelemetrySidebar';
+import { StatusFooter } from '@/components/StatusFooter';
 
 // NEW: Import RAG components
 import RAGCopilotPanel from '@/components/RAGCopilotPanel';
@@ -21,15 +21,18 @@ export default function MissionControlWithRAG() {
   const [activeQuery, setActiveQuery] = useState<string>('');
   const [routing, setRouting] = useState<any>(null);
   const [showRAGPanel, setShowRAGPanel] = useState(true); // Toggle RAG panel
+  const [isProcessing, setIsProcessing] = useState(false);
 
   return (
     <div className="h-screen flex flex-col bg-[#0A0B0D]">
       {/* Top Bar */}
       <TopBar
-        onQuerySubmit={(query, useLLM) => {
+        onSubmit={(query, useLLM) => {
           setActiveQuery(query);
           // Submit query logic...
         }}
+        isProcessing={isProcessing}
+        activeQueryId={activeQueryId || undefined}
       />
 
       {/* Main Layout */}
@@ -37,8 +40,8 @@ export default function MissionControlWithRAG() {
         {/* Left Sidebar: Runs */}
         <div className="w-80 border-r border-gray-800">
           <RunsSidebar
-            activeRunId={activeQueryId}
-            onRunSelect={setActiveQueryId}
+            activeRunId={activeQueryId || undefined}
+            onSelectRun={setActiveQueryId}
           />
         </div>
 
@@ -96,7 +99,7 @@ export default function MissionControlWithRAG() {
 
           {/* Execution Logs */}
           <div className="flex-1 overflow-hidden">
-            <ExecutionLogs queryId={activeQueryId} />
+            <ExecutionLogs logs={[]} />
           </div>
         </div>
 
@@ -131,12 +134,12 @@ export default function MissionControlWithRAG() {
             {showRAGPanel ? (
               // NEW: RAG COPILOT PANEL
               <RAGCopilotPanel
-                queryId={activeQueryId}
+                queryId={activeQueryId || undefined}
                 activeQuery={activeQuery}
               />
             ) : (
               // Original Telemetry Sidebar
-              <TelemetrySidebar queryId={activeQueryId} />
+              <TelemetrySidebar />
             )}
           </div>
         </div>
@@ -156,13 +159,14 @@ export function MissionControlWithRAGModal() {
   const [showRAGModal, setShowRAGModal] = useState(false);
   const [activeQueryId, setActiveQueryId] = useState<string | null>(null);
   const [activeQuery, setActiveQuery] = useState<string>('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
   return (
     <>
       {/* Original Mission Control Layout */}
       <div className="h-screen flex flex-col bg-[#0A0B0D]">
         <TopBar
-          onQuerySubmit={(query, useLLM) => {
+          onSubmit={(query, useLLM) => {
             setActiveQuery(query);
             // If RAG query, show modal
             if (query.toLowerCase().includes('literature') ||
@@ -171,6 +175,8 @@ export function MissionControlWithRAGModal() {
               setShowRAGModal(true);
             }
           }}
+          isProcessing={isProcessing}
+          activeQueryId={activeQueryId || undefined}
         />
 
         {/* ... rest of layout ... */}
@@ -207,7 +213,7 @@ export function MissionControlWithRAGModal() {
             {/* Modal Content */}
             <div className="h-[calc(100%-73px)] overflow-hidden">
               <RAGCopilotPanel
-                queryId={activeQueryId}
+                queryId={activeQueryId || undefined}
                 activeQuery={activeQuery}
               />
             </div>
@@ -284,6 +290,6 @@ export function ResultsPanelWithRAG({ queryData }: { queryData: any }) {
   }
 
   // Regular results for other agents
-  return <ResultsPanel queryData={queryData} />;
+  return <ResultsPanel results={queryData?.results} analysis={queryData?.analysis} suggestions={queryData?.suggestions} />;
 }
 

@@ -1,0 +1,14 @@
+<?xml version='1.0' encoding='utf-8'?>
+<materials>
+  <material id="1" name="fuel" depletable="true" temperature="900.0">
+    <density value="10.4" units="g/cm3"/>
+    <nuclide name="U235" ao="0.015"/>
+    <nuclide name="U238" ao="0.3183333333333333"/>
+    <nuclide name="O16" ao="0.6666666666666666"/>
+  </material>
+  <material id="2" name="moderator" temperature="600.0">
+    <density value="0.7" units="g/cm3"/>
+    <nuclide name="H1" ao="0.6666666666666666"/>
+    <nuclide name="O16" ao="0.3333333333333333"/>
+  </material>
+</materials>
