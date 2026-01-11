@@ -68,20 +68,16 @@ export function useGlobalTerminalStream(): UseGlobalTerminalStreamReturn {
       };
 
       eventSource.onerror = (err) => {
-        console.error('Terminal stream error:', err);
+        // Silently handle error - don't spam console
         setIsConnected(false);
         
         if (eventSource.readyState === EventSource.CLOSED) {
-          console.log('Terminal stream closed');
-          setError('Connection closed');
-          
-          // Attempt to reconnect after 2 seconds
-          reconnectTimeoutRef.current = setTimeout(() => {
-            console.log('Attempting to reconnect...');
-            connect();
-          }, 2000);
-        } else {
-          setError('Stream connection error');
+          // Don't reconnect automatically if endpoint doesn't exist (404)
+          // Only show error once
+          if (!error) {
+            setError('Terminal stream endpoint not available. Start the backend server with terminal streaming enabled.');
+            console.warn('Terminal stream endpoint not available at:', streamUrl);
+          }
         }
         
         eventSource.close();
@@ -99,6 +95,12 @@ export function useGlobalTerminalStream(): UseGlobalTerminalStreamReturn {
     setEvents([]);
     setError(null);
     setIsConnected(false);
+    
+    // Clear any pending reconnect
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+    }
+    
     connect();
   };
 
@@ -109,10 +111,14 @@ export function useGlobalTerminalStream(): UseGlobalTerminalStreamReturn {
 
   // Connect on mount
   useEffect(() => {
-    connect();
+    // Add a small delay before connecting to avoid race conditions
+    const timer = setTimeout(() => {
+      connect();
+    }, 1000);
 
     // Cleanup on unmount
     return () => {
+      clearTimeout(timer);
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }

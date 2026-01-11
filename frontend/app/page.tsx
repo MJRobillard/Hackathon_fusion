@@ -14,6 +14,7 @@ import { HealthPanel } from '@/components/HealthPanel';
 import RAGCopilotPanel from '@/components/RAGCopilotPanel';
 import RAGAgentCard from '@/components/RAGAgentCard';
 import GlobalTerminal from '@/components/GlobalTerminal';
+import OpenMCBackendPanel from '@/components/OpenMCBackendPanel';
 import { useEventStream } from '@/hooks/useEventStream';
 import { useQueryHistory } from '@/hooks/useQueryHistory';
 import { apiService } from '@/lib/api';
@@ -27,6 +28,7 @@ export default function Home() {
   const [showDatabase, setShowDatabase] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
   const [showRAGPanel, setShowRAGPanel] = useState(false);
+  const [terminalMode, setTerminalMode] = useState<'stream' | 'openmc'>('stream');
   const queryClient = useQueryClient();
 
   const { queries, addQuery, updateQuery, getQuery } = useQueryHistory();
@@ -288,11 +290,47 @@ export default function Home() {
             )}
           </div>
 
-          {/* Global Backend Terminal - Full Width */}
-          <div className="flex-1 flex gap-4 min-h-0">
-            {/* Backend Terminal streams ALL output */}
-            <div className="flex-1 min-w-0">
-              <GlobalTerminal autoScroll={true} maxLines={5000} />
+          {/* Backend Terminal / OpenMC Panel - Full Width */}
+          <div className="flex-1 flex flex-col gap-2 min-h-0">
+            {/* Terminal Mode Toggle */}
+            <div className="flex items-center gap-2 px-2">
+              <div className="flex gap-1 bg-gray-900 rounded-lg p-1 border border-gray-800">
+                <button
+                  onClick={() => setTerminalMode('stream')}
+                  className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${
+                    terminalMode === 'stream'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  📡 Backend Stream
+                </button>
+                <button
+                  onClick={() => setTerminalMode('openmc')}
+                  className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${
+                    terminalMode === 'openmc'
+                      ? 'bg-purple-600 text-white'
+                      : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  ⚛️ OpenMC Engine
+                </button>
+              </div>
+              <div className="flex-1"></div>
+              <div className="text-xs text-gray-500">
+                {terminalMode === 'stream' 
+                  ? 'Streaming all backend output' 
+                  : 'Direct OpenMC simulation control'}
+              </div>
+            </div>
+
+            {/* Terminal Content */}
+            <div className="flex-1 min-h-0">
+              {terminalMode === 'stream' ? (
+                <GlobalTerminal autoScroll={true} maxLines={5000} />
+              ) : (
+                <OpenMCBackendPanel />
+              )}
             </div>
           </div>
         </div>

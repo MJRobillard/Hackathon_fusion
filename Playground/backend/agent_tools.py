@@ -319,7 +319,49 @@ def submit_study(study_spec: Dict[str, Any]) -> Dict[str, Any]:
     
     summaries_col.insert_one(summary.model_dump())
     
-    print(f"  [OK] keff = {result['keff']:.5f} +/- {result['keff_std']:.6f}")
+    # Enhanced result display
+    print(f"\n  {'='*70}")
+    print(f"  ✅ SIMULATION COMPLETE")
+    print(f"  {'='*70}")
+    print(f"  Run ID:         {run_id}")
+    print(f"  Status:         {result['status']}")
+    print(f"  Runtime:        {result['runtime_seconds']:.2f} seconds")
+    print(f"\n  RESULTS:")
+    print(f"  ┌─────────────────────────────────────────────────────────────┐")
+    print(f"  │  k-effective = {result['keff']:.5f} ± {result['keff_std']:.6f}                 │")
+    
+    # Calculate uncertainty in pcm (percent mille)
+    uncertainty_pcm = result['keff_std'] * 1e5
+    print(f"  │  Uncertainty = {uncertainty_pcm:.0f} pcm ({result['keff_std']/result['keff']*100:.3f}%)               │")
+    print(f"  └─────────────────────────────────────────────────────────────┘")
+    
+    # Physical interpretation
+    print(f"\n  PHYSICS INTERPRETATION:")
+    if result['keff'] > 1.01:
+        reactivity_pcm = (result['keff'] - 1.0) / result['keff'] * 1e5
+        print(f"  🔥 System is SUPERCRITICAL (k > 1)")
+        print(f"     Excess reactivity: {reactivity_pcm:.0f} pcm")
+        print(f"     → Neutron population is increasing")
+    elif result['keff'] < 0.99:
+        reactivity_pcm = (result['keff'] - 1.0) / result['keff'] * 1e5
+        print(f"  ❄️  System is SUBCRITICAL (k < 1)")
+        print(f"     Reactivity deficit: {reactivity_pcm:.0f} pcm")
+        print(f"     → Neutron population is decreasing")
+    else:
+        print(f"  ⚖️  System is near CRITICAL (k ≈ 1)")
+        print(f"     → Neutron population is stable")
+    
+    # Configuration summary
+    print(f"\n  CONFIGURATION:")
+    print(f"  • Geometry:     {spec.geometry}")
+    print(f"  • Materials:    {', '.join(spec.materials)}")
+    if spec.enrichment_pct:
+        print(f"  • Enrichment:   {spec.enrichment_pct}%")
+    if spec.temperature_K:
+        print(f"  • Temperature:  {spec.temperature_K} K")
+    print(f"  • Particles:    {spec.particles:,}")
+    print(f"  • Batches:      {spec.batches}")
+    print(f"  {'='*70}\n")
     
     return {
         "run_id": run_id,
@@ -372,11 +414,18 @@ def generate_sweep(base_spec: Dict[str, Any], param_name: str, param_values: Lis
     )
     """
     print(f"\n[TOOL: generate_sweep]")
-    print(f"  Sweeping {param_name} over {len(param_values)} values")
+    print(f"  {'='*70}")
+    print(f"  🔄 PARAMETER SWEEP: {param_name}")
+    print(f"  {'='*70}")
+    print(f"  Sweep values: {param_values}")
+    print(f"  Number of runs: {len(param_values)}")
+    print(f"  {'─'*70}")
     
     run_ids = []
     
-    for value in param_values:
+    for i, value in enumerate(param_values, 1):
+        print(f"\n  [{i}/{len(param_values)}] Running with {param_name} = {value}...")
+        
         # Create variant spec
         variant_spec = base_spec.copy()
         variant_spec[param_name] = value
@@ -385,7 +434,12 @@ def generate_sweep(base_spec: Dict[str, Any], param_name: str, param_values: Lis
         result = submit_study(variant_spec)
         run_ids.append(result["run_id"])
     
-    print(f"  [OK] Generated {len(run_ids)} runs")
+    print(f"\n  {'='*70}")
+    print(f"  ✅ SWEEP COMPLETE")
+    print(f"  {'='*70}")
+    print(f"  Generated {len(run_ids)} runs")
+    print(f"  Run IDs: {run_ids}")
+    print(f"  {'='*70}\n")
     
     return run_ids
 
@@ -397,32 +451,96 @@ def compare_runs(run_ids: List[str]) -> Dict[str, Any]:
     Returns structured comparison data
     """
     print(f"\n[TOOL: compare_runs]")
-    print(f"  Comparing {len(run_ids)} runs")
+    print(f"  {'='*70}")
+    print(f"  📊 COMPARING {len(run_ids)} SIMULATION RUNS")
+    print(f"  {'='*70}")
     
     results = list(summaries_col.find({"run_id": {"$in": run_ids}}))
     
     if not results:
+        print(f"  ❌ ERROR: No results found for provided run_ids")
         return {"error": "No results found for provided run_ids"}
     
     # Extract key metrics
+    keff_values = [r["keff"] for r in results]
+    keff_mean = sum(keff_values) / len(keff_values)
+    keff_min = min(keff_values)
+    keff_max = max(keff_values)
+    keff_range = keff_max - keff_min
+    
     comparison = {
         "num_runs": len(results),
-        "keff_values": [r["keff"] for r in results],
-        "keff_mean": sum(r["keff"] for r in results) / len(results),
-        "keff_min": min(r["keff"] for r in results),
-        "keff_max": max(r["keff"] for r in results),
+        "keff_values": keff_values,
+        "keff_mean": keff_mean,
+        "keff_min": keff_min,
+        "keff_max": keff_max,
+        "keff_range": keff_range,
         "runs": []
     }
     
-    for r in results:
+    # Display summary statistics
+    print(f"\n  SUMMARY STATISTICS:")
+    print(f"  ┌─────────────────────────────────────────────────────────────┐")
+    print(f"  │  Number of runs:    {len(results):>3}                                   │")
+    print(f"  │  k-eff mean:        {keff_mean:.5f}                              │")
+    print(f"  │  k-eff range:       [{keff_min:.5f}, {keff_max:.5f}]        │")
+    print(f"  │  k-eff spread:      {keff_range:.5f} ({keff_range*1e5:.0f} pcm)                │")
+    print(f"  └─────────────────────────────────────────────────────────────┘")
+    
+    # Display individual runs
+    print(f"\n  INDIVIDUAL RESULTS:")
+    for i, r in enumerate(results, 1):
         comparison["runs"].append({
             "run_id": r["run_id"],
             "keff": r["keff"],
             "keff_std": r["keff_std"],
             "spec": r["spec"]
         })
+        
+        # Format run details
+        keff_str = f"{r['keff']:.5f} ± {r['keff_std']:.6f}"
+        
+        # Check which parameter varies (if enrichment sweep)
+        spec_detail = ""
+        if "enrichment_pct" in r["spec"] and r["spec"]["enrichment_pct"]:
+            spec_detail = f"enrichment={r['spec']['enrichment_pct']}%"
+        elif "temperature_K" in r["spec"] and r["spec"]["temperature_K"]:
+            spec_detail = f"temp={r['spec']['temperature_K']}K"
+        
+        # Criticality indicator
+        if r['keff'] > 1.01:
+            status = "🔥 SUPER"
+        elif r['keff'] < 0.99:
+            status = "❄️  SUB"
+        else:
+            status = "⚖️  CRITICAL"
+        
+        print(f"  {i:2d}. {status}  k={keff_str}  {spec_detail}")
     
-    print(f"  keff range: [{comparison['keff_min']:.5f}, {comparison['keff_max']:.5f}]")
+    # Trend analysis for sweeps
+    if len(results) >= 3:
+        print(f"\n  TREND ANALYSIS:")
+        # Check if it's increasing or decreasing
+        if keff_values == sorted(keff_values):
+            print(f"  📈 Monotonically INCREASING trend")
+        elif keff_values == sorted(keff_values, reverse=True):
+            print(f"  📉 Monotonically DECREASING trend")
+        else:
+            print(f"  〰️  Non-monotonic trend")
+        
+        # Calculate approximate gradient (if enrichment sweep)
+        first_run = results[0]
+        last_run = results[-1]
+        if "enrichment_pct" in first_run["spec"] and "enrichment_pct" in last_run["spec"]:
+            e1 = first_run["spec"]["enrichment_pct"]
+            e2 = last_run["spec"]["enrichment_pct"]
+            k1 = first_run["keff"]
+            k2 = last_run["keff"]
+            if e1 and e2 and e1 != e2:
+                gradient = (k2 - k1) / (e2 - e1)
+                print(f"  📊 Reactivity coefficient: {gradient:.4f} Δk/Δenrichment")
+    
+    print(f"  {'='*70}\n")
     
     return comparison
 
