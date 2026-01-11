@@ -50,28 +50,37 @@ print(f"  📖 ReDoc: http://{os.getenv('API_HOST')}:{os.getenv('API_PORT')}/red
 print("=" * 80)
 print("")
 
-# Start server
-try:
-    import uvicorn
-    
-    # Change to API directory
-    api_dir = Path(__file__).parent / "api"
-    os.chdir(api_dir)
-    
-    # Run server
-    uvicorn.run(
-        "main_v2:app",
-        host=os.getenv("API_HOST", "0.0.0.0"),
-        port=int(os.getenv("API_PORT", "8000")),
-        reload=True,
-        log_level="info"
-    )
-    
-except ImportError:
-    print("❌ ERROR: uvicorn not installed")
-    print("Install with: pip install uvicorn")
-    sys.exit(1)
-except KeyboardInterrupt:
-    print("\n\n✓ Server stopped")
-    sys.exit(0)
+if __name__ == "__main__":
+    # Start server
+    try:
+        import uvicorn
+        
+        # Change to API directory
+        api_dir = Path(__file__).parent / "api"
+        os.chdir(api_dir)
+        
+        # Detect if running on Windows (disable reload to avoid multiprocessing issues)
+        is_windows = sys.platform.startswith('win') or 'microsoft' in os.uname().release.lower()
+        use_reload = not is_windows
+        
+        if is_windows:
+            print("⚠️  Note: Auto-reload disabled on Windows")
+            print("")
+        
+        # Run server
+        uvicorn.run(
+            "main_v2:app",
+            host=os.getenv("API_HOST", "0.0.0.0"),
+            port=int(os.getenv("API_PORT", "8000")),
+            reload=use_reload,
+            log_level="info"
+        )
+        
+    except ImportError:
+        print("❌ ERROR: uvicorn not installed")
+        print("Install with: pip install uvicorn")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n\n✓ Server stopped")
+        sys.exit(0)
 

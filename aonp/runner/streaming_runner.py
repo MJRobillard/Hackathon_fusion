@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""
+Streaming OpenMC simulation runner that captures stdout for SSE streaming.
+"""
+
+import os
+import sys
+import time
+import json
+import subprocess
+from pathlib import Path
+from typing import Generator, Optional
+import asyncio
+from threading import Thread
+import queue
+
+
+class StreamingSimulationRunner:
+    """
+    Executes OpenMC simulation and captures stdout line-by-line for streaming.
+    """
+    
+    def __init__(self, run_dir: Path):
+        self.run_dir = Path(run_dir)
+        self.inputs_dir = self.run_dir / "inputs"
+        self.outputs_dir = self.run_dir / "outputs"
+        self.manifest_path = self.run_dir / "run_manifest.json"
+        
+    def validate_setup(self) -> tuple[bool, Optional[str]]:
+        """Validate directory structure and manifest."""
+        if not self.inputs_dir.exists():
+            return False, f"inputs directory not found: {self.inputs_dir}"
+        
+        if not self.manifest_path.exists():
+            return False, f"run_manifest.json not found: {self.manifest_path}"
+        
+        return True, None
+    
+    def load_manifest(self) -> dict:
+        """Load run manifest."""
+        with open(self.manifest_path) as f:
+            return json.load(f)
+    
+    def save_manifest(self, manifest: dict):
+        """Save run manifest."""
+        with open(self.manifest_path, 'w') as f:
+            json.dump(manifest, f, indent=2)
+    
+    def setup_environment(self, manifest: dict):
+        """Configure environment variables for OpenMC."""
+        # Set nuclear data path
+        nuclear_data_ref = self.run_dir / "nuclear_data.ref.json"
+        if nuclear_data_ref.exists():
+            with open(nuclear_data_ref) as f:
+                nd_config = json.load(f)
+            
+            cross_sections_xml = Path(nd_config['cross_sections_path'])
+            if cross_sections_xml.exists():
+                os.environ['OPENMC_CROSS_SECTIONS'] = str(cross_sections_xml)
+        
+        # Configure threading
+        if 'OMP_NUM_THREADS' not in os.environ:
+            import multiprocessing
+            threads = max(1, multiprocessing.cpu_count() - 2)
+            os.environ['OMP_NUM_THREADS'] = str(threads)
+    
+    def stream_simulation(self) -> Generator[str, None, None]:
+        """
+        Execute OpenMC simulation and yield stdout lines in real-time.
+        
+        Yields:
+            Lines of stdout from OpenMC simulation
+        """
+        # Validate setup
+        valid, error = self.validate_setup()
+        if not valid:
+            yield f"[ERROR] {error}\n"
+            return
+        
+        # Load and update manifest
+        manifest = self.load_manifest()
+        
+        # Setup environment
+        self.setup_environment(manifest)
+        
+        # Create outputs directory
+        self.outputs_dir.mkdir(exist_ok=True)
+        
+        # Yield initial information
+        yield f"Run ID: {manifest['run_id']}\n"
+        yield f"Spec Hash: {manifest['spec_hash'][:12]}...\n"
+        yield f"\n{'='*60}\n"
+        yield "Starting OpenMC simulation...\n"
+        yield f"{'='*60}\n\n"
+        
+        # Update manifest status
+        manifest['status'] = 'running'
+        self.save_manifest(manifest)
+        
+        start_time = time.time()
+        
+        # Check OpenMC installation
+        try:
+            result = subprocess.run(
+                ['python', '-c', 'import openmc; print(openmc.__version__)'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode != 0:
+                yield "[ERROR] OpenMC not installed!\n"
+                yield "Install with: pip install openmc\n"
+                manifest['status'] = 'failed'
+                manifest['error'] = 'OpenMC not installed'
+                self.save_manifest(manifest)
+                return
+            
+            openmc_version = result.stdout.strip()
+            yield f"OpenMC version: {openmc_version}\n\n"
+        except Exception as e:
+            yield f"[ERROR] Failed to check OpenMC: {e}\n"
+            manifest['status'] = 'failed'
+            manifest['error'] = str(e)
+            self.save_manifest(manifest)
+            return
+        
+        # Execute simulation with real-time output
+        try:
+            # Run OpenMC as subprocess to capture stdout
+            process = subprocess.Popen(
+                [
+                    sys.executable, '-c',
+                    f'''
+import openmc
+import sys
+sys.stdout.flush()
+openmc.run(cwd="{self.inputs_dir}", output=True)
+'''
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            # Stream output line by line
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    yield line
+            
+            process.wait()
+            
+            if process.returncode != 0:
+                yield f"\n[ERROR] Simulation failed with exit code {process.returncode}\n"
+                manifest['status'] = 'failed'
+                manifest['error'] = f'Exit code {process.returncode}'
+                self.save_manifest(manifest)
+                return
+            
+            elapsed = time.time() - start_time
+            yield f"\n✓ Simulation completed in {elapsed:.2f} seconds\n"
+            
+            # Move outputs
+            moved_files = []
+            for pattern in ["statepoint.*.h5", "summary.h5", "tallies.out"]:
+                for file in self.inputs_dir.glob(pattern):
+                    dest = self.outputs_dir / file.name
+                    file.rename(dest)
+                    moved_files.append(file.name)
+            
+            if moved_files:
+                yield f"\nMoved output files: {', '.join(moved_files)}\n"
+            
+            # Update manifest with success
+            manifest['runtime_seconds'] = elapsed
+            manifest['status'] = 'completed'
+            manifest['openmc_version'] = openmc_version
+            manifest['python_version'] = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+            self.save_manifest(manifest)
+            
+            yield f"\n[OK] Results written to: {self.outputs_dir}\n"
+            
+        except subprocess.TimeoutExpired:
+            yield "\n[ERROR] Simulation timed out\n"
+            manifest['status'] = 'failed'
+            manifest['error'] = 'Timeout'
+            self.save_manifest(manifest)
+        except Exception as e:
+            yield f"\n[ERROR] Simulation failed: {e}\n"
+            manifest['status'] = 'failed'
+            manifest['error'] = str(e)
+            self.save_manifest(manifest)
+
+
+async def async_stream_simulation(run_dir: Path) -> Generator[str, None, None]:
+    """
+    Async wrapper for streaming simulation output.
+    
+    Args:
+        run_dir: Path to run directory
+        
+    Yields:
+        Lines of simulation output
+    """
+    runner = StreamingSimulationRunner(run_dir)
+    
+    # Use thread pool to avoid blocking
+    loop = asyncio.get_event_loop()
+    q = queue.Queue()
+    
+    def run_in_thread():
+        try:
+            for line in runner.stream_simulation():
+                q.put(line)
+        finally:
+            q.put(None)  # Sentinel
+    
+    thread = Thread(target=run_in_thread, daemon=True)
+    thread.start()
+    
+    # Yield from queue
+    while True:
+        # Non-blocking check with timeout
+        try:
+            line = await loop.run_in_executor(None, q.get, True, 0.1)
+            if line is None:
+                break
+            yield line
+        except queue.Empty:
+            await asyncio.sleep(0.01)
+            continue
+
+
+if __name__ == "__main__":
+    """Command-line interface for testing."""
+    import sys
+    
+    if len(sys.argv) != 2:
+        print("Usage: python streaming_runner.py <run_dir>")
+        sys.exit(1)
+    
+    run_dir = Path(sys.argv[1])
+    runner = StreamingSimulationRunner(run_dir)
+    
+    for line in runner.stream_simulation():
+        print(line, end='', flush=True)
+

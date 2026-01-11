@@ -1,0 +1,15 @@
+# RAG System - Git Ignore
+# Add these lines to your main .gitignore
+
+# ChromaDB Vector Store
+rag/chroma_db/
+rag/*.sqlite3
+rag/*.db
+
+# Voyage AI Cache (if any)
+.voyage_cache/
+
+# Test outputs
+rag/test_*.txt
+rag/*.log
+

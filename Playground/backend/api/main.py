@@ -5,6 +5,7 @@ FastAPI implementation for frontend integration
 
 import os
 import sys
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -20,6 +21,11 @@ from dotenv import load_dotenv
 # Import existing AONP components
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from aonp_agents import run_aonp_agent, create_aonp_graph, AONPAgentState
+
+# Import terminal streaming from parent directory
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from terminal_streamer import terminal_broadcaster, install_terminal_interceptor
+
 
 load_dotenv()
 
@@ -214,6 +220,13 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     await startup_db()
+    
+    # Initialize terminal streaming
+    loop = asyncio.get_event_loop()
+    terminal_broadcaster.set_event_loop(loop)
+    install_terminal_interceptor()
+    print("🚀 AONP Multi-Agent API Server Started")
+    print("📡 Terminal streaming enabled - output being broadcast")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -651,6 +664,55 @@ async def get_statistics(mongodb = Depends(get_database)):
         completed_runs=completed_runs,
         total_requests=total_requests,
         recent_runs=recent_runs
+    )
+
+
+@app.get("/api/v1/terminal/stream")
+async def stream_terminal_output():
+    """
+    Stream ALL backend terminal output in real-time (stdout + stderr).
+    
+    Captures everything including agent execution, OpenMC output, API logs, etc.
+    
+    Returns:
+        SSE stream of all terminal output
+    """
+    async def event_generator():
+        """Generate SSE events from terminal output."""
+        queue = terminal_broadcaster.subscribe()
+        
+        try:
+            # Send initial connection message
+            init_msg = {
+                'timestamp': datetime.utcnow().isoformat(),
+                'stream': 'system',
+                'content': '[Connected to terminal stream]\n'
+            }
+            yield f"data: {json.dumps(init_msg)}\n\n"
+            
+            while True:
+                try:
+                    # Wait for next event (30 second timeout for keepalive)
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                    
+                except asyncio.TimeoutError:
+                    # Send keepalive
+                    yield f": keepalive\n\n"
+                    
+        except asyncio.CancelledError:
+            pass
+        finally:
+            terminal_broadcaster.unsubscribe(queue)
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
     )
 
 

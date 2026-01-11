@@ -22,6 +22,14 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from multi_agent_system import MultiAgentOrchestrator
 from agent_tools import compare_runs as compare_runs_tool
 
+# Import RAG endpoints
+try:
+    from rag_endpoints import rag_router, init_rag_system
+    RAG_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  RAG system not available: {e}")
+    RAG_AVAILABLE = False
+
 load_dotenv()
 
 # ============================================================================
@@ -220,10 +228,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include RAG router if available
+if RAG_AVAILABLE:
+    app.include_router(rag_router)
+    print("✅ RAG Copilot endpoints registered")
+
 # Startup/Shutdown events
 @app.on_event("startup")
 async def startup_event():
     await startup_db()
+    
+    # Initialize RAG system if available
+    if RAG_AVAILABLE:
+        try:
+            init_rag_system(mongo_uri=MONGODB_URI)
+        except Exception as e:
+            print(f"⚠️  RAG system initialization failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -273,6 +293,9 @@ async def execute_multi_agent_query(query_id: str, query: str, mongodb, use_llm:
         completed_at = datetime.now(timezone.utc)
         created_at_doc = await mongodb.queries.find_one({"query_id": query_id})
         created_at = created_at_doc["created_at"]
+        # Ensure timezone-aware datetime
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
         duration = (completed_at - created_at).total_seconds()
         
         await mongodb.queries.update_one(

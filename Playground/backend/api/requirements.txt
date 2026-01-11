@@ -25,6 +25,10 @@ langchain-fireworks==0.2.10
 langgraph==1.0.1
 voyageai==0.5.0
 
+# RAG System
+chromadb==0.4.22
+pymupdf==1.23.26
+
 # Testing (optional)
 pytest==7.4.4
 pytest-asyncio==0.23.3

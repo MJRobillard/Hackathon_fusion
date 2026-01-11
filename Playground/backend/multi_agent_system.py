@@ -103,6 +103,23 @@ class RouterAgent:
                 "method": "keyword"
             }
         
+        # Check for RAG copilot keywords
+        rag_keywords = [
+            'literature', 'paper', 'research', 'publication', 'doi',
+            'reproduce', 'reproducibility', 'validate', 'benchmark',
+            'suggest', 'recommend', 'follow-up', 'next experiment',
+            'similar runs', 'past experiments', 'history',
+            'why', 'explain', 'how does', 'what about', 'tell me about'
+        ]
+        if any(kw in query_lower for kw in rag_keywords):
+            return {
+                "agent": "rag_copilot",
+                "intent": "rag_query",
+                "context": {"query": query},
+                "confidence": 0.8,
+                "method": "keyword"
+            }
+        
         # Default to single study
         return {
             "agent": "studies",
