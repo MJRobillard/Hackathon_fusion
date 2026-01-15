@@ -247,8 +247,11 @@ export default function OpenMCBackendPanel() {
                   </label>
                   <input
                     type="number"
-                    value={formData.enrichment_pct}
-                    onChange={(e) => setFormData({ ...formData, enrichment_pct: parseFloat(e.target.value) })}
+                    value={isNaN(formData.enrichment_pct) ? '' : formData.enrichment_pct}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      setFormData({ ...formData, enrichment_pct: isNaN(val) ? 0 : val });
+                    }}
                     className="w-full px-3 py-2 text-sm bg-gray-800 text-gray-200 rounded border border-gray-700 focus:outline-none focus:border-blue-500"
                     min="0"
                     max="20"
@@ -262,8 +265,11 @@ export default function OpenMCBackendPanel() {
                   </label>
                   <input
                     type="number"
-                    value={formData.temperature_K}
-                    onChange={(e) => setFormData({ ...formData, temperature_K: parseFloat(e.target.value) })}
+                    value={isNaN(formData.temperature_K) ? '' : formData.temperature_K}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      setFormData({ ...formData, temperature_K: isNaN(val) ? 0 : val });
+                    }}
                     className="w-full px-3 py-2 text-sm bg-gray-800 text-gray-200 rounded border border-gray-700 focus:outline-none focus:border-blue-500"
                     min="0"
                     step="1"
@@ -278,8 +284,11 @@ export default function OpenMCBackendPanel() {
                   </label>
                   <input
                     type="number"
-                    value={formData.particles}
-                    onChange={(e) => setFormData({ ...formData, particles: parseInt(e.target.value) })}
+                    value={isNaN(formData.particles) ? '' : formData.particles}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setFormData({ ...formData, particles: isNaN(val) ? 0 : val });
+                    }}
                     className="w-full px-3 py-2 text-sm bg-gray-800 text-gray-200 rounded border border-gray-700 focus:outline-none focus:border-blue-500"
                     min="100"
                     step="1000"
@@ -292,8 +301,11 @@ export default function OpenMCBackendPanel() {
                   </label>
                   <input
                     type="number"
-                    value={formData.batches}
-                    onChange={(e) => setFormData({ ...formData, batches: parseInt(e.target.value) })}
+                    value={isNaN(formData.batches) ? '' : formData.batches}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setFormData({ ...formData, batches: isNaN(val) ? 0 : val });
+                    }}
                     className="w-full px-3 py-2 text-sm bg-gray-800 text-gray-200 rounded border border-gray-700 focus:outline-none focus:border-blue-500"
                     min="10"
                     step="10"

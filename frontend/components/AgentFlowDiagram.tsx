@@ -42,7 +42,7 @@ export function AgentFlowDiagram({ routing, agentStatuses, isProcessing }: Agent
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-sm font-semibold text-gray-200">Agent Workflow</h3>
-        {routing && (
+        {routing && routing.method && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-gray-500">Method:</span>
             <span className={routing.method === 'keyword' ? 'text-blue-400' : 'text-purple-400'}>

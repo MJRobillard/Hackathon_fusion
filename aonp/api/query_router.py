@@ -8,6 +8,7 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -26,6 +27,10 @@ from aonp.api.openmc_router import (
 )
 import threading
 import aonp.api.openmc_router as openmc_router
+
+# MongoDB imports for RAG stats
+# We'll import lazily in the endpoint to avoid startup failures if MongoDB isn't configured
+MONGODB_AVAILABLE = None  # Will be checked at runtime
 
 
 @dataclass
@@ -653,7 +658,62 @@ def rag_suggest(payload: Dict[str, Any]):
 
 @router.get("/rag/stats")
 def rag_stats():
-    return {"status": "disabled"}
+    """Get RAG statistics including MongoDB run counts and vector store info."""
+    runs_count = 0
+    
+    # Try to import and use MongoDB
+    try:
+        from aonp.db import col_runs, get_db
+        
+        try:
+            # Test connection first
+            db = get_db()
+            db.command('ping')
+            
+            # Count runs
+            runs_collection = col_runs()
+            runs_count = runs_collection.count_documents({})
+            print(f"[RAG Stats] ✅ MongoDB connected - runs count: {runs_count}")
+        except Exception as e:
+            import traceback
+            print(f"[RAG Stats] ⚠️  MongoDB connection/query error: {e}")
+            print(f"[RAG Stats] Traceback: {traceback.format_exc()}")
+            runs_count = 0
+    except ImportError as e:
+        print(f"[RAG Stats] ⚠️  MongoDB module not available: {e}")
+        runs_count = 0
+    except RuntimeError as e:
+        # This happens if MONGODB_URI is not set in environment
+        print(f"[RAG Stats] ⚠️  MongoDB not configured: {e}")
+        runs_count = 0
+    except Exception as e:
+        import traceback
+        print(f"[RAG Stats] ❌ Unexpected error accessing MongoDB: {e}")
+        print(f"[RAG Stats] Traceback: {traceback.format_exc()}")
+        runs_count = 0
+    
+    # Vector store location (ChromaDB)
+    import os
+    project_root = Path(__file__).resolve().parents[3]
+    vector_store_path = str(project_root / "Playground" / "backend" / "rag" / "chroma_db")
+    
+    result = {
+        "collections": {
+            "papers": {
+                "count": 0,
+                "description": "Research papers indexed in vector store"
+            },
+            "runs": {
+                "count": runs_count,
+                "description": "Simulation runs available in MongoDB"
+            }
+        },
+        "vector_store": {
+            "type": "ChromaDB",
+            "location": vector_store_path
+        }
+    }
+    return result
 
 
 @router.get("/rag/health")

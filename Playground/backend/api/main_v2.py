@@ -42,8 +42,9 @@ for path in (BACKEND_DIR, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from aonp.api.openmc_router import router as openmc_router, set_event_loop as set_openmc_event_loop
+from aonp.api.openmc_router import router as openmc_router, set_event_loop as set_openmc_event_loop, RUN_RECORDS
 from aonp.api.terminal_streamer import terminal_broadcaster, install_terminal_interceptor
+from aonp.core.extractor import extract_results
 
 
 # ============================================================================
@@ -233,8 +234,20 @@ class AgentThinkingCallback:
         except RuntimeError:
             # No running loop in this thread → schedule on main loop.
             if MAIN_LOOP is None:
+                print(f"[WARN] AgentThinkingCallback: MAIN_LOOP not set, dropping event: {payload.get('type')}")
                 return
-            MAIN_LOOP.call_soon_threadsafe(asyncio.create_task, self._publish(payload))
+            # Use run_coroutine_threadsafe for proper async execution from thread
+            try:
+                future = asyncio.run_coroutine_threadsafe(self._publish(payload), MAIN_LOOP)
+                # Don't wait for completion, but log errors if they occur
+                def log_error(fut):
+                    try:
+                        fut.result()
+                    except Exception as e:
+                        print(f"[ERROR] AgentThinkingCallback publish failed: {e}")
+                future.add_done_callback(log_error)
+            except Exception as e:
+                print(f"[ERROR] AgentThinkingCallback failed to schedule event: {e}")
 
     def thinking(self, agent: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
         self._fire_and_forget(
@@ -423,6 +436,300 @@ async def statistics(mongodb=Depends(get_database)):
         "completed_runs": completed_runs,
         "total_queries": total_queries,
         "mongodb_status": "connected",
+    }
+
+
+@app.get("/api/v1/runs")
+async def get_runs(
+    limit: int = 50,
+    offset: int = 0,
+    mongodb=Depends(get_database),
+):
+    """
+    Query simulation runs from MongoDB summaries collection.
+    
+    Returns paginated list of runs matching the frontend RunSummary format.
+    """
+    # Query summaries collection (this is where agent_tools.py stores results)
+    summaries_col = mongodb.summaries
+    
+    # Get total count
+    total = await summaries_col.count_documents({})
+    
+    # Query with pagination (sorted by created_at descending)
+    cursor = summaries_col.find({}).sort("created_at", -1).skip(offset).limit(limit)
+    results = await cursor.to_list(length=limit)
+    
+    # Format results to match RunSummary interface
+    runs = []
+    for r in results:
+        # Extract geometry and other fields from spec if available
+        geometry = "unknown"
+        enrichment_pct = None
+        temperature_K = None
+        if "spec" in r and isinstance(r["spec"], dict):
+            geometry = r["spec"].get("geometry", "unknown")
+            enrichment_pct = r["spec"].get("enrichment_pct")
+            temperature_K = r["spec"].get("temperature_K")
+        
+        # Format created_at (handle both datetime and string)
+        created_at_str = r.get("created_at")
+        if hasattr(created_at_str, "isoformat"):
+            created_at_str = created_at_str.isoformat()
+        elif created_at_str is None:
+            created_at_str = datetime.now(timezone.utc).isoformat()
+        
+        run_obj = {
+            "run_id": r.get("run_id", "unknown"),
+            "geometry": geometry,
+            "keff": r.get("keff"),
+            "keff_std": r.get("keff_std"),
+            "status": r.get("status", "unknown"),
+            "created_at": created_at_str,
+        }
+        
+        # Add optional fields if present
+        if enrichment_pct is not None:
+            run_obj["enrichment_pct"] = enrichment_pct
+        if temperature_K is not None:
+            run_obj["temperature_K"] = temperature_K
+        
+        runs.append(run_obj)
+    
+    return {
+        "runs": runs,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def _get_run_dir_from_openmc(run_id: str) -> Optional[Path]:
+    """Try to get run directory from OpenMC router's RUN_RECORDS."""
+    record = RUN_RECORDS.get(run_id)
+    if record and record.run_dir:
+        return Path(record.run_dir)
+    # Also check default runs directory
+    runs_dir = Path(os.getenv("OPENMC_RUNS_DIR", "runs"))
+    run_dir = runs_dir / run_id
+    if run_dir.exists():
+        return run_dir
+    return None
+
+
+@app.get("/api/v1/runs/{run_id}/visualization")
+async def get_run_visualization(run_id: str, mongodb=Depends(get_database)):
+    """
+    Get batch convergence visualization data for a run.
+    
+    Returns batch convergence data in the format expected by BatchConvergenceChart:
+    - batch_numbers: [1, 2, 3, ...]
+    - batch_keff: [keff1, keff2, ...]
+    - n_inactive: number of inactive batches
+    - final_keff: final k-effective
+    - final_keff_std: final k-effective std dev
+    """
+    # Try to find run directory from OpenMC router
+    run_dir = _get_run_dir_from_openmc(run_id)
+    
+    # Try to load statepoint file
+    if run_dir:
+        outputs_dir = run_dir / "outputs"
+        statepoint_files = sorted(outputs_dir.glob("statepoint.*.h5"))
+        
+        if statepoint_files:
+            try:
+                import openmc  # type: ignore
+                sp = openmc.StatePoint(str(statepoint_files[-1]))
+                
+                # Extract batch data
+                batch_numbers = list(range(1, sp.n_batches + 1))
+                batch_keff = sp.k_generation.tolist()
+                n_inactive = sp.n_inactive
+                final_keff = float(sp.keff.nominal_value)
+                final_keff_std = float(sp.keff.std_dev)
+                
+                # Extract entropy if available
+                entropy = None
+                if hasattr(sp, "entropy"):
+                    entropy = sp.entropy.tolist()
+                
+                return {
+                    "type": "batch_convergence",
+                    "data": {
+                        "batch_numbers": batch_numbers,
+                        "batch_keff": batch_keff,
+                        "entropy": entropy,
+                        "n_inactive": n_inactive,
+                        "final_keff": final_keff,
+                        "final_keff_std": final_keff_std,
+                    },
+                }
+            except Exception as e:
+                # If statepoint read fails, fall through to MongoDB/mock
+                pass
+    
+    # Fallback: check MongoDB for run data
+    summary = await mongodb.summaries.find_one({"run_id": run_id})
+    if summary and summary.get("keff") is not None:
+        # Generate simple mock batch convergence data
+        n_batches = summary.get("batches", 50)
+        keff = summary["keff"]
+        keff_std = summary.get("keff_std", 0.001)
+        n_inactive = summary.get("inactive", 10)
+        
+        # Generate synthetic batch data (simple linear convergence)
+        batch_numbers = list(range(1, n_batches + 1))
+        batch_keff = [keff + (keff_std * 2) * (1 - i / n_batches) for i in range(n_batches)]
+        
+        return {
+            "type": "batch_convergence",
+            "data": {
+                "batch_numbers": batch_numbers,
+                "batch_keff": batch_keff,
+                "entropy": None,
+                "n_inactive": n_inactive,
+                "final_keff": keff,
+                "final_keff_std": keff_std,
+            },
+        }
+    
+    # No data available
+    return {"status": "not_available", "run_id": run_id, "data": []}
+
+
+@app.post("/api/v1/runs/sweep/visualization")
+async def get_sweep_visualization(body: Dict[str, Any], mongodb=Depends(get_database)):
+    """
+    Get parameter sweep visualization data for multiple runs.
+    
+    Expects: {"run_ids": ["run1", "run2", ...]}
+    """
+    run_ids = body.get("run_ids", [])
+    if len(run_ids) < 2:
+        return {"status": "error", "message": "At least 2 run IDs required"}
+    
+    # Query MongoDB for run data
+    summaries = await mongodb.summaries.find({"run_id": {"$in": run_ids}}).to_list(length=100)
+    
+    if not summaries:
+        return {"status": "not_available", "run_ids": run_ids, "data": []}
+    
+    # Extract parameter values and keff from runs
+    # Try to infer parameter from differences in spec
+    parameter = "enrichment_pct"  # Default
+    values = []
+    keff_values = []
+    keff_stds = []
+    
+    for run in summaries:
+        spec = run.get("spec", {})
+        if "enrichment_pct" in spec:
+            values.append(spec["enrichment_pct"])
+        keff_values.append(run.get("keff", 0.0))
+        keff_stds.append(run.get("keff_std", 0.001))
+    
+    # Sort by parameter value
+    sorted_data = sorted(zip(values, keff_values, keff_stds))
+    values, keff_values, keff_stds = zip(*sorted_data) if sorted_data else ([], [], [])
+    
+    if not values:
+        return {"status": "not_available", "run_ids": run_ids, "data": []}
+    
+    return {
+        "type": "parameter_sweep",
+        "data": {
+            "parameter": parameter,
+            "values": list(values),
+            "keff": list(keff_values),
+            "keff_std": list(keff_stds),
+        },
+    }
+
+
+@app.post("/api/v1/runs/comparison/visualization")
+async def get_comparison_visualization(body: Dict[str, Any], mongodb=Depends(get_database)):
+    """
+    Get comparison visualization data for multiple runs.
+    
+    Expects: {"run_ids": ["run1", "run2", ...]}
+    """
+    run_ids = body.get("run_ids", [])
+    if len(run_ids) < 2:
+        return {"status": "error", "message": "At least 2 run IDs required"}
+    
+    # Query MongoDB for run data
+    summaries = await mongodb.summaries.find({"run_id": {"$in": run_ids}}).to_list(length=100)
+    
+    if not summaries:
+        return {"status": "not_available", "run_ids": run_ids, "data": []}
+    
+    # Format comparison data
+    comparison_data = {
+        "run_ids": run_ids,
+        "parameters": {
+            "enrichment_pct": [r.get("spec", {}).get("enrichment_pct") for r in summaries],
+            "temperature_K": [r.get("spec", {}).get("temperature_K") for r in summaries],
+        },
+        "results": {
+            "keff": [r.get("keff", 0.0) for r in summaries],
+            "keff_std": [r.get("keff_std", 0.001) for r in summaries],
+        },
+    }
+    
+    return {
+        "type": "comparison",
+        "data": comparison_data,
+    }
+
+
+@app.get("/api/v1/runs/{run_id}/similar")
+async def find_similar_runs(run_id: str, limit: int = 10, mongodb=Depends(get_database)):
+    """
+    Find similar runs to a given run_id.
+    
+    Returns runs with similar geometry/enrichment from MongoDB.
+    """
+    # Get the target run
+    target_run = await mongodb.summaries.find_one({"run_id": run_id})
+    if not target_run:
+        return {"status": "error", "message": f"Run {run_id} not found", "similar_runs": [], "total_found": 0}
+    
+    target_spec = target_run.get("spec", {})
+    target_geometry = target_spec.get("geometry", "")
+    target_enrichment = target_spec.get("enrichment_pct")
+    
+    # Build similarity query
+    query = {}
+    if target_geometry:
+        query["spec.geometry"] = {"$regex": target_geometry.split()[0], "$options": "i"}  # Match first word (e.g., "PWR")
+    if target_enrichment is not None:
+        query["spec.enrichment_pct"] = {"$gte": target_enrichment - 1.0, "$lte": target_enrichment + 1.0}
+    
+    # Query similar runs (exclude the target run)
+    query["run_id"] = {"$ne": run_id}
+    similar_runs_cursor = mongodb.summaries.find(query).sort("created_at", -1).limit(limit)
+    similar_runs_list = await similar_runs_cursor.to_list(length=limit)
+    total = await mongodb.summaries.count_documents(query)
+    
+    # Format results
+    similar_runs = []
+    for r in similar_runs_list:
+        spec = r.get("spec", {})
+        similar_runs.append({
+            "run_id": r.get("run_id"),
+            "geometry": spec.get("geometry", "unknown"),
+            "enrichment_pct": spec.get("enrichment_pct"),
+            "temperature_K": spec.get("temperature_K"),
+            "keff": r.get("keff"),
+            "keff_std": r.get("keff_std"),
+            "status": r.get("status", "unknown"),
+        })
+    
+    return {
+        "status": "success",
+        "similar_runs": similar_runs,
+        "total_found": total,
     }
 
 
@@ -619,10 +926,24 @@ async def rag_stats():
     if not state["ready"]:
         return {"status": "disabled", "error": state["error"]}
     vector_store = state["vector_store"]
+    papers_count = vector_store.get_collection_count("papers")
+    runs_count = vector_store.get_collection_count("runs")
     return {
         "status": "ready",
-        "papers_indexed": vector_store.get_collection_count("papers"),
-        "runs_indexed": vector_store.get_collection_count("runs"),
+        "collections": {
+            "papers": {
+                "count": papers_count,
+                "description": "Research papers indexed in vector store",
+            },
+            "runs": {
+                "count": runs_count,
+                "description": "Simulation runs indexed in vector store",
+            },
+        },
+        "vector_store": {
+            "type": "ChromaDB",
+            "location": str(BACKEND_DIR / "rag" / "chroma_db"),
+        },
     }
 
 

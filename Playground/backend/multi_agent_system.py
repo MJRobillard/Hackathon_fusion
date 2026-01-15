@@ -27,17 +27,100 @@ from agent_tools import (
 
 from orchestration_config import get_orchestration_config
 
+# Import prompt config and validation
+try:
+    from prompt_config import get_prompt_config
+    USE_PROMPT_CONFIG = True
+except ImportError:
+    USE_PROMPT_CONFIG = False
+
+try:
+    from tool_validation import validate_tool_call
+    USE_VALIDATION = True
+except ImportError:
+    USE_VALIDATION = False
+
 load_dotenv()
 
 # ============================================================================
 # LLM SETUP
 # ============================================================================
 
-llm = ChatFireworks(
-    api_key=os.getenv("FIREWORKS"),
-    model="accounts/robillard-matthew22/deployedModels/nvidia-nemotron-nano-9b-v2-nsoeqcp4",
-    temperature=0.7
-)
+def _should_use_local() -> bool:
+    """Check if RUN_LOCAL is set to use local DeepSeek."""
+    run_local = os.getenv("RUN_LOCAL", "").lower()
+    return run_local in ("true", "1", "yes", "on")
+
+def _get_local_model_name() -> str:
+    """Get local DeepSeek model name from environment or default."""
+    return os.getenv("LOCAL_DEEPSEEK_MODEL", "deepseek-r1:1.5b")
+
+def _get_ollama_url() -> str:
+    """Get Ollama API base URL from environment or default."""
+    return os.getenv("LOCAL_DEEPSEEK_URL", "http://localhost:11434")
+
+def _create_llm():
+    """Create LLM instance based on RUN_LOCAL setting."""
+    if _should_use_local():
+        # Use local DeepSeek via Ollama's OpenAI-compatible API
+        try:
+            from langchain_openai import ChatOpenAI
+            
+            model_name = _get_local_model_name()
+            ollama_url = _get_ollama_url()
+            temperature = 0.7
+            
+            # Ollama provides OpenAI-compatible API at /v1 endpoint
+            base_url = f"{ollama_url}/v1"
+            
+            # Try model_name first (older langchain-openai), then model (newer)
+            try:
+                llm = ChatOpenAI(
+                    model_name=model_name,
+                    base_url=base_url,
+                    api_key="ollama",  # Ollama doesn't require a real key, but LangChain expects one
+                    temperature=temperature,
+                )
+            except TypeError:
+                # Newer versions of langchain-openai use 'model' instead of 'model_name'
+                llm = ChatOpenAI(
+                    model=model_name,
+                    base_url=base_url,
+                    api_key="ollama",
+                    temperature=temperature,
+                )
+            # Set model name and temperature as attributes for easy access
+            # (getattr() calls in RouterAgent and StudiesAgent need these)
+            # Use object.__setattr__ to bypass Pydantic validation for these custom attributes
+            object.__setattr__(llm, "model", model_name)
+            object.__setattr__(llm, "temperature", temperature)
+            return llm
+        except ImportError:
+            print("⚠️  Warning: langchain-openai not available, falling back to Fireworks")
+            # Fall through to Fireworks
+        except Exception as e:
+            print(f"⚠️  Warning: Local DeepSeek setup failed ({e}), falling back to Fireworks")
+            # Fall through to Fireworks
+    
+    # Use Fireworks API (default)
+    model_name = "accounts/robillard-matthew22/deployedModels/nvidia-nemotron-nano-9b-v2-nsoeqcp4"
+    temperature = 0.7
+    llm = ChatFireworks(
+        api_key=os.getenv("FIREWORKS"),
+        model=model_name,
+        temperature=temperature
+    )
+    # Set model name and temperature as attributes for easy access
+    # (getattr() calls in RouterAgent and StudiesAgent need these)
+    # ChatFireworks already has model and temperature as attributes, but we ensure they're accessible
+    # Use object.__setattr__ to bypass Pydantic validation if needed, or just ensure they exist
+    if not hasattr(llm, "model"):
+        object.__setattr__(llm, "model", model_name)
+    if not hasattr(llm, "temperature"):
+        object.__setattr__(llm, "temperature", temperature)
+    return llm
+
+llm = _create_llm()
 
 # ============================================================================
 # HELPERS (lightweight, UI-friendly “agentic trace”)
@@ -167,14 +250,19 @@ class RouterAgent:
         """
         print(f"\n[ROUTER] Analyzing query: {query[:60]}...")
         if self.thinking_callback:
-            self.thinking_callback.thinking(
-                "Router",
-                f"Analyzing query: '{query}'",
-                {
-                    "query_length": len(query),
-                    "goal": "Classify intent and route to the best specialist agent (studies/sweep/query/analysis)",
-                },
-            )
+            try:
+                self.thinking_callback.thinking(
+                    "Router",
+                    f"Analyzing query: '{query}'",
+                    {
+                        "query_length": len(query),
+                        "goal": "Classify intent and route to the best specialist agent (studies/sweep/query/analysis)",
+                    },
+                )
+            except Exception as e:
+                print(f"[WARN] RouterAgent: thinking_callback.thinking() failed: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Use keyword routing if LLM is disabled
         if not self.use_llm:
@@ -184,7 +272,12 @@ class RouterAgent:
             return self._keyword_route(query)
         
         # Try LLM routing
-        system_prompt = """You are a routing agent for nuclear simulation requests.
+        if USE_PROMPT_CONFIG:
+            prompt_config = get_prompt_config()
+            system_prompt = prompt_config.get_prompt("router", "system")
+            if not system_prompt:
+                # Fallback to default
+                system_prompt = """You are a routing agent for nuclear simulation requests.
 
 Classify the user's request into ONE of these categories:
 1. "single_study" - User wants to run ONE specific simulation
@@ -192,7 +285,24 @@ Classify the user's request into ONE of these categories:
 3. "query" - User wants to SEARCH or LIST past results
 4. "analysis" - User wants to ANALYZE or COMPARE specific runs
 
-Respond with ONLY the category name, nothing else."""
+CRITICAL: Respond with ONLY the category name. No explanations, no reasoning, no markdown, no additional text."""
+        else:
+            system_prompt = """You are a routing agent for nuclear simulation requests.
+
+Classify the user's request into ONE of these categories:
+1. "single_study" - User wants to run ONE specific simulation
+2. "sweep" - User wants to VARY a parameter and run MULTIPLE simulations
+3. "query" - User wants to SEARCH or LIST past results
+4. "analysis" - User wants to ANALYZE or COMPARE specific runs
+
+CRITICAL: Respond with ONLY the category name. No explanations, no reasoning, no markdown, no additional text.
+Examples:
+- Input: "Run parameter sweep for enrichment 3% to 5%" → Output: "sweep"
+- Input: "Show me recent runs" → Output: "query"
+- Input: "Simulate a PWR pin cell" → Output: "single_study"
+- Input: "Compare run_123 and run_456" → Output: "analysis"
+
+Your response must be exactly one word: single_study, sweep, query, or analysis."""
         
         messages = [
             SystemMessage(content=system_prompt),
@@ -202,19 +312,24 @@ Respond with ONLY the category name, nothing else."""
         try:
             # Call LLM
             if self.thinking_callback:
-                self.thinking_callback.planning(
-                    "Router",
-                    "Using LLM-based routing",
-                    {
-                        "method": "llm",
-                        "llm_input": {
-                            "purpose": "intent_classification",
-                            "model": getattr(self.llm, "model", None),
-                            "temperature": getattr(self.llm, "temperature", None),
-                            "messages": _serialize_messages(messages),
+                try:
+                    self.thinking_callback.planning(
+                        "Router",
+                        "Using LLM-based routing",
+                        {
+                            "method": "llm",
+                            "llm_input": {
+                                "purpose": "intent_classification",
+                                "model": getattr(self.llm, "model", None),
+                                "temperature": getattr(self.llm, "temperature", None),
+                                "messages": _serialize_messages(messages),
                         },
                     },
-                )
+                    )
+                except Exception as e:
+                    print(f"[WARN] RouterAgent: thinking_callback.planning() failed: {e}")
+                    import traceback
+                    traceback.print_exc()
             response = self.llm.invoke(messages)
             raw_response = response.content.strip()
             print(f"[ROUTER] Raw LLM response: '{raw_response}'")
@@ -455,6 +570,19 @@ class StudiesAgent:
         if self.thinking_callback:
             self.thinking_callback.observation("Studies Agent", "Extracted simulation parameters", {"spec": spec})
         
+        # Step 1.5: Validate tool call before execution (if validation available)
+        if USE_VALIDATION:
+            valid, validated_spec, errors = validate_tool_call("submit_study", spec)
+            if not valid:
+                if self.thinking_callback:
+                    self.thinking_callback.observation("Studies Agent", "Validation failed", {"errors": errors})
+                return {
+                    "status": "error",
+                    "error": f"Invalid parameters: {', '.join(errors)}",
+                    "validation_errors": errors
+                }
+            spec = validated_spec or spec
+        
         # Step 2: Validate physics
         if self.thinking_callback:
             self.thinking_callback.tool_call("Studies Agent", "validate_physics", spec)
@@ -635,7 +763,12 @@ class StudiesAgent:
             kw_spec = None
         
         # Try LLM-based extraction
-        system_prompt = """You are a nuclear reactor physics expert.
+        if USE_PROMPT_CONFIG:
+            prompt_config = get_prompt_config()
+            system_prompt = prompt_config.get_prompt("studies_agent", "system")
+            if not system_prompt:
+                # Fallback to default
+                system_prompt = """You are a nuclear reactor physics expert.
 
 Extract a simulation study specification from the user's request.
 Output ONLY valid JSON with this structure:
@@ -649,7 +782,32 @@ Output ONLY valid JSON with this structure:
     "inactive": int or null (optional inactive batches)
 }
 
-Use reasonable defaults if not specified. Output JSON only, no explanation."""
+CRITICAL: Output ONLY valid JSON, no markdown code blocks, no explanations."""
+        else:
+            system_prompt = """You are a nuclear reactor physics expert.
+
+Extract a simulation study specification from the user's request.
+Output ONLY valid JSON with this structure:
+{
+    "geometry": "description (e.g., PWR pin cell, BWR assembly)",
+    "materials": ["list", "of", "materials"],
+    "enrichment_pct": float or null,
+    "temperature_K": float or null,
+    "particles": int (default 10000),
+    "batches": int (default 50),
+    "inactive": int or null (optional inactive batches)
+}
+
+CRITICAL RULES:
+- Output ONLY valid JSON, no markdown code blocks, no explanations
+- enrichment_pct must be between 0 and 20 (if specified)
+- temperature_K must be between 300 and 1500 (if specified)
+- particles must be >= 1000
+- batches must be >= 10
+- Use reasonable defaults if not specified
+
+Example output:
+{"geometry": "PWR pin cell", "materials": ["UO2", "Zircaloy", "Water"], "enrichment_pct": 4.5, "temperature_K": 600, "particles": 10000, "batches": 50}"""
         
         messages = [
             SystemMessage(content=system_prompt),

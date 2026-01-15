@@ -84,7 +84,7 @@ export default function Home() {
       const newQuery: QueryData = {
         query_id: data.query_id,
         query: '',
-        status: data.status,
+        status: data.status as 'queued' | 'processing' | 'completed' | 'failed',
         created_at: new Date().toISOString(),
       };
 
@@ -214,7 +214,7 @@ export default function Home() {
   const missionControlLogs = useMemo(() => {
     return logs.map(log => ({
       timestamp: new Date(log.timestamp).toLocaleTimeString(),
-      level: log.level === 'success' ? 'INFO' : log.level.toUpperCase() as any,
+      level: log.level === 'success' ? 'INFO' : (log.level ? log.level.toUpperCase() : 'INFO') as any,
       message: log.message,
     }));
   }, [logs]);
@@ -227,7 +227,7 @@ export default function Home() {
       keff: activeQuery.results.keff,
       keff_std: activeQuery.results.keff_std,
       convergenceRate: 75,
-      iteration: activeQuery.results.batches || 42,
+      iteration: (activeQuery.results as any).batches || 42,
       totalIterations: 100,
       run_id: activeQuery.results.run_id,
       interlocks: {

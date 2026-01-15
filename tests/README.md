@@ -2,6 +2,47 @@
 
 ## Test Categories
 
+### 0. Local DeepSeek Integration Tests (`test_local_deepseek_multi_agent.py`)
+
+**Requires Ollama + deepseek-r1:1.5b model** - Tests local DeepSeek integration:
+
+- ✅ LLM creation with RUN_LOCAL=true
+- ✅ Model name exposure (not null)
+- ✅ RouterAgent with local DeepSeek
+- ✅ Agent reasoning shows correct model name
+- ✅ Custom model name configuration
+- ✅ Custom Ollama URL configuration
+
+**Prerequisites**:
+1. Ollama installed and running: `ollama serve`
+2. Model downloaded: `ollama pull deepseek-r1:1.5b`
+3. `langchain-openai` installed: `pip install langchain-openai`
+4. Set `RUN_LOCAL=true` in environment
+
+**Run with pytest**:
+```bash
+RUN_LOCAL=true pytest tests/test_local_deepseek_multi_agent.py -v
+```
+
+**Run integration script**:
+```bash
+RUN_LOCAL=true python scripts/test_local_deepseek_integration.py
+```
+
+**Expected output**:
+```
+✓ LLM Creation
+✓ RouterAgent Model Name Exposure
+✓ RouterAgent Functionality
+✓ All tests passed!
+```
+
+**What it tests**:
+- When `RUN_LOCAL=true`, the system creates `ChatOpenAI` pointing to Ollama (not `ChatFireworks`)
+- Model name is accessible via `getattr(llm, "model", None)` and is not `None`
+- RouterAgent planning events include the correct model name in `llm_input.model`
+- Routing functionality works correctly with local DeepSeek
+
 ### 1. Core Tests (`test_core_only.py`)
 
 **No OpenMC required** - Tests fundamental functionality:

@@ -9,9 +9,17 @@ interface DatabasePanelProps {
   onClose: () => void;
 }
 
+interface Document {
+  _id?: string;
+  id?: string;
+  query?: string;
+  created_at?: string;
+  [key: string]: any;
+}
+
 export function DatabasePanel({ isOpen, onClose }: DatabasePanelProps) {
   const [selectedCollection, setSelectedCollection] = useState<string>('');
-  const [selectedDocument, setSelectedDocument] = useState<any>(null);
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
   const [page, setPage] = useState(0);
   const pageSize = 20;
 
@@ -38,7 +46,8 @@ export function DatabasePanel({ isOpen, onClose }: DatabasePanelProps) {
 
   if (!isOpen) return null;
 
-  const totalPages = totalCount ? Math.ceil(totalCount / pageSize) : 0;
+  const count = totalCount?.count ?? 0;
+  const totalPages = count > 0 ? Math.ceil(count / pageSize) : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -113,9 +122,9 @@ export function DatabasePanel({ isOpen, onClose }: DatabasePanelProps) {
                     <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wide">
                       {selectedCollection}
                     </h3>
-                    {totalCount !== undefined && (
+                    {count > 0 && (
                       <p className="text-[10px] text-gray-500 mt-0.5">
-                        {totalCount} documents
+                        {count} documents
                       </p>
                     )}
                   </div>
@@ -152,7 +161,7 @@ export function DatabasePanel({ isOpen, onClose }: DatabasePanelProps) {
                     </div>
                   ) : documents && documents.length > 0 ? (
                     <div className="space-y-2">
-                      {documents.map((doc, index) => (
+                      {documents.map((doc: Document, index: number) => (
                         <button
                           key={doc._id || index}
                           onClick={() => setSelectedDocument(doc)}

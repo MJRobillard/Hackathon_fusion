@@ -144,5 +144,9 @@ def check_ollama_available() -> bool:
             
             # Check if our model is available
             return any(model_name in name or name in model_name for name in available_models)
-    except Exception:
+    except urllib.error.URLError as e:
+        # Connection error - Ollama is not running or not accessible
+        return False
+    except Exception as e:
+        # Other errors (JSON parsing, etc.)
         return False
