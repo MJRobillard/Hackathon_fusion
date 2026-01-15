@@ -74,6 +74,15 @@ async def route_node(state: QueryGraphState) -> QueryGraphState:
 
     from multi_agent_system import RouterAgent
 
+    # Emit a lightweight routing progress event (frontend shows this as "Routing query...")
+    await ctx.publish(
+        {
+            "type": "routing",
+            "message": "Routing query...",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
     await ctx.publish(
         {
             "type": "agent_start",

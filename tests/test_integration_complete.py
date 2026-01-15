@@ -14,7 +14,6 @@ from unittest.mock import patch, Mock
 
 # Add paths
 sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent / "Playground" / "backend"))
 
 
 class TestCompleteIntegration:
@@ -25,7 +24,7 @@ class TestCompleteIntegration:
         """Mock OpenMC execution for systems without it."""
         with patch('aonp.runner.entrypoint.run_simulation') as mock_run:
             mock_run.return_value = 0  # Success
-            
+
             with patch('aonp.core.extractor.extract_results') as mock_extract:
                 mock_extract.return_value = {
                     "keff": 1.18456,
@@ -35,12 +34,13 @@ class TestCompleteIntegration:
                     "n_inactive": 2,
                     "n_particles": 1000
                 }
-                
-                yield
+
+                with patch('aonp.runner.openmc_adapter.extract_results', new=mock_extract):
+                    yield
     
     def test_agent_to_results_pipeline(self, tmp_path, mock_openmc_execution):
         """Test complete pipeline from agent spec to results."""
-        from Playground.backend.openmc_adapter import OpenMCAdapter
+        from aonp.runner.openmc_adapter import OpenMCAdapter
         
         # Initialize adapter
         adapter = OpenMCAdapter(runs_dir=tmp_path)
@@ -90,7 +90,7 @@ class TestCompleteIntegration:
                 setup_mock_outputs(run_dir, spec_hash)
                 return run_dir, spec_hash
             
-            with patch('Playground.backend.openmc_adapter.create_run_bundle', side_effect=create_bundle_with_mocks):
+            with patch('aonp.runner.openmc_adapter.create_run_bundle', side_effect=create_bundle_with_mocks):
                 # Execute pipeline
                 result = adapter.execute_real_openmc(agent_spec, run_id="integration_test")
         
@@ -112,7 +112,7 @@ class TestCompleteIntegration:
     
     def test_parameter_sweep_pipeline(self, tmp_path, mock_openmc_execution):
         """Test parameter sweep through adapter."""
-        from Playground.backend.openmc_adapter import OpenMCAdapter
+        from aonp.runner.openmc_adapter import OpenMCAdapter
         
         adapter = OpenMCAdapter(runs_dir=tmp_path)
         
@@ -149,7 +149,7 @@ class TestCompleteIntegration:
             setup_mock_outputs(run_dir, spec_hash)
             return run_dir, spec_hash
         
-        with patch('Playground.backend.openmc_adapter.create_run_bundle', side_effect=create_bundle_with_mocks):
+        with patch('aonp.runner.openmc_adapter.create_run_bundle', side_effect=create_bundle_with_mocks):
             for enrichment in enrichments:
                 spec = base_spec.copy()
                 spec["enrichment_pct"] = enrichment
@@ -173,7 +173,7 @@ class TestCompleteIntegration:
             pytest.skip("MONGO_URI not set - skipping MongoDB test")
         
         from pymongo import MongoClient
-        from Playground.backend.openmc_adapter import OpenMCAdapter
+        from aonp.runner.openmc_adapter import OpenMCAdapter
         
         # Setup MongoDB
         client = MongoClient(mongo_uri)
@@ -218,7 +218,7 @@ class TestCompleteIntegration:
                 setup_mock_outputs(run_dir, spec_hash)
                 return run_dir, spec_hash
             
-            with patch('Playground.backend.openmc_adapter.create_run_bundle', side_effect=create_bundle_with_mocks):
+            with patch('aonp.runner.openmc_adapter.create_run_bundle', side_effect=create_bundle_with_mocks):
                 result = adapter.execute_real_openmc(agent_spec, run_id="mongo_test")
             
             # Store in MongoDB
@@ -262,7 +262,7 @@ class TestCompleteIntegration:
     
     def test_error_handling(self, tmp_path):
         """Test error handling in pipeline."""
-        from Playground.backend.openmc_adapter import OpenMCAdapter
+        from aonp.runner.openmc_adapter import OpenMCAdapter
         
         adapter = OpenMCAdapter(runs_dir=tmp_path)
         

@@ -58,6 +58,11 @@ if __name__ == "__main__":
         # Change to API directory
         api_dir = Path(__file__).parent / "api"
         os.chdir(api_dir)
+        # Ensure programmatic uvicorn import can find `main_v2.py` in this directory
+        # (when running via `python start_server.py`, sys.path[0] points to the script
+        # directory, not the chdir() target).
+        if str(api_dir) not in sys.path:
+            sys.path.insert(0, str(api_dir))
         
         # Detect if running on Windows (disable reload to avoid multiprocessing issues)
         is_windows = sys.platform.startswith('win') or 'microsoft' in os.uname().release.lower()

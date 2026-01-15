@@ -101,6 +101,38 @@ function CollapsibleSection({ title, icon, children, defaultOpen = false, color 
   );
 }
 
+const DEFAULT_CONFIG: OrchestrationConfig = {
+  convergence: {
+    enabled: false,
+    target_uncertainty_pcm: 0,
+    stable_delta_pcm: 0,
+    max_iterations: 1,
+    max_particles: 0,
+    max_batches: 0,
+    batches_step: 10,
+    particles_min_step: 100,
+  },
+  tool_prompts: {
+    tool_call_template: '',
+    tool_result_template: '',
+    per_tool_call_template: {},
+  },
+};
+
+const normalizeConfig = (data: Partial<OrchestrationConfig> | null): OrchestrationConfig => ({
+  convergence: {
+    ...DEFAULT_CONFIG.convergence,
+    ...(data?.convergence || {}),
+  },
+  tool_prompts: {
+    ...DEFAULT_CONFIG.tool_prompts,
+    ...(data?.tool_prompts || {}),
+    per_tool_call_template: {
+      ...(data?.tool_prompts?.per_tool_call_template || {}),
+    },
+  },
+});
+
 export function ToolAgentConfigSidebar() {
   const [config, setConfig] = useState<OrchestrationConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -117,9 +149,10 @@ export function ToolAgentConfigSidebar() {
       setLoading(true);
       setError(null);
       const data = await apiService.getOrchestrationConfig();
-      setConfig(data);
+      setConfig(normalizeConfig(data));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load config');
+      setConfig(normalizeConfig(null));
     } finally {
       setLoading(false);
     }
@@ -417,7 +450,7 @@ export function ToolAgentConfigSidebar() {
                 </label>
                 <input
                   type="text"
-                  value={config.tool_prompts.per_tool_call_template[toolName] || ''}
+                  value={config.tool_prompts.per_tool_call_template?.[toolName] || ''}
                   onChange={(e) => updatePerToolTemplate(toolName, e.target.value)}
                   className="w-full px-2 py-1.5 bg-[#14161B] border border-[#1F2937] rounded text-xs text-gray-300 focus:border-emerald-500 focus:outline-none font-mono"
                   placeholder="Override (blank = use global template)"

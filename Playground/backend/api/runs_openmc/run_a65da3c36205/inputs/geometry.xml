@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='UTF-8'?>
-<geometry>
-  <cell id="1" name="fuel" material="1" region="-1" universe="1"/>
-  <cell id="2" name="moderator" material="2" region="1 -2" universe="1"/>
-  <surface id="1" name="fuel_outer" type="z-cylinder" coeffs="0.0 0.0 0.39"/>
-  <surface id="2" name="pin_outer" type="z-cylinder" boundary="reflective" coeffs="0.0 0.0 0.63"/>
-</geometry>

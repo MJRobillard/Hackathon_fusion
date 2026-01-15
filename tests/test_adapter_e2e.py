@@ -16,9 +16,8 @@ from unittest.mock import Mock, patch, MagicMock
 
 # Add paths for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent / "Playground" / "backend"))
 
-from Playground.backend.openmc_adapter import OpenMCAdapter, execute_real_openmc
+from aonp.runner.openmc_adapter import OpenMCAdapter, execute_real_openmc
 from aonp.schemas.study import StudySpec
 
 
@@ -373,11 +372,11 @@ class TestEndToEndExecution:
         }
         
         # Mock the run_simulation function
-        with patch('Playground.backend.openmc_adapter.run_simulation') as mock_run:
+        with patch('aonp.runner.openmc_adapter.runner_entrypoint.run_simulation') as mock_run:
             mock_run.return_value = 0  # Success
             
             # Mock the extract_results function
-            with patch('Playground.backend.openmc_adapter.extract_results') as mock_extract:
+            with patch('aonp.runner.openmc_adapter.extract_results') as mock_extract:
                 mock_extract.return_value = {
                     "keff": 1.18456,
                     "keff_std": 0.00234,
@@ -405,7 +404,7 @@ class TestEndToEndExecution:
                     statepoint_path = outputs_dir / "statepoint.05.h5"
                     statepoint_path.touch()
                 
-                with patch('Playground.backend.openmc_adapter.create_run_bundle') as mock_bundle:
+                with patch('aonp.runner.openmc_adapter.create_run_bundle') as mock_bundle:
                     test_run_dir = tmp_path / "run_test"
                     test_run_dir.mkdir()
                     (test_run_dir / "outputs").mkdir()
@@ -471,7 +470,7 @@ class TestConvenienceFunction:
     def test_convenience_function(self, tmp_path):
         """Test execute_real_openmc convenience function."""
         # Change to temp directory for test
-        with patch('Playground.backend.openmc_adapter.OpenMCAdapter') as mock_adapter_class:
+        with patch('aonp.runner.openmc_adapter.OpenMCAdapter') as mock_adapter_class:
             mock_adapter = Mock()
             mock_adapter.execute_real_openmc.return_value = {
                 "status": "completed",

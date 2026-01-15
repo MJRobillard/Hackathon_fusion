@@ -233,58 +233,18 @@ Results stored in MongoDB:
 
 ```
 Hackathon_fusion/
-├── aonp/                          # Core AONP package
+├── aonp/                          # Core backend package
 │   ├── schemas/                   # Pydantic data models
-│   │   ├── study.py               # StudySpec with deterministic hashing
-│   │   └── manifest.py            # RunManifest (provenance record)
-│   ├── core/                      # Core utilities
-│   │   ├── bundler.py             # Creates canonical run bundles
-│   │   └── extractor.py           # Post-processing (H5 → Parquet)
-│   ├── db/                        # MongoDB persistence layer
-│   │   ├── mongo.py               # Database operations
-│   │   └── README.md              # Database documentation
-│   ├── runner/                    # Execution logic
-│   │   ├── entrypoint.py          # OpenMC simulation runner
-│   │   └── Dockerfile             # Container environment
-│   ├── api/                       # REST API
-│   │   └── main.py                # FastAPI application
+│   ├── core/                      # Bundling + extraction
+│   ├── runner/                    # OpenMC execution + adapter
+│   ├── api/                       # FastAPI apps (main_v2.py)
 │   └── examples/                  # Example studies
-│       ├── simple_pincell.yaml
-│       └── pincell_geometry.py
-│
-├── Playground/                    # Agent orchestration system
-│   └── backend/
-│       ├── graphs/                # LangGraph state machines
-│       │   └── query_graph.py     # Main query orchestration
-│       ├── multi_agent_system.py  # Router + specialist agents
-│       ├── agent_tools.py         # MongoDB simulation tools
-│       ├── openmc_adapter.py      # OpenMC integration adapter
-│       └── api/
-│           ├── main.py            # FastAPI server
-│           ├── main_v2.py         # Enhanced API with agents
-│           └── rag_endpoints.py   # RAG-enhanced endpoints
 │
 ├── frontend/                      # Next.js web interface
-│   ├── app/                       # Next.js App Router
-│   │   ├── page.tsx               # Main application page
-│   │   └── layout.tsx             # App layout
-│   ├── components/                # React components
-│   │   ├── RAGCopilotPanel.tsx    # Main chat interface
-│   │   └── RAGAgentCard.tsx       # Agent status cards
-│   ├── hooks/                     # React hooks
-│   │   ├── useEventStream.ts      # SSE event streaming
-│   │   └── useQueryHistory.ts     # Query history management
-│   └── lib/                       # Utilities
-│       ├── api.ts                 # API client
-│       └── types.ts               # TypeScript types
-│
+├── docs/                          # Consolidated documentation
+├── tests/                         # Test suites
+├── scripts/                       # Utility scripts
 ├── verification_studies/          # Validation test cases
-│   ├── 01_toy_geometry.py
-│   ├── 02_single_torus.py
-│   └── ...
-│
-├── openmc_design.md               # OpenMC integration design doc
-├── OPENMC_API_SPEC.md             # API specification
 ├── requirements.txt               # Python dependencies
 ├── pyproject.toml                 # Project metadata
 └── README.md                      # This file
@@ -324,9 +284,8 @@ conda install -c conda-forge openmc
 # Option 2: pip (may require system dependencies)
 pip install openmc
 
-# Configure environment
-cp Playground/backend/env_example.txt .env
-# Edit .env with your MongoDB URI and API keys
+# Configure environment (optional)
+# Create a .env with your MongoDB URI and API keys
 ```
 
 #### 2. MongoDB Setup
@@ -357,7 +316,7 @@ cd frontend
 npm install
 
 # Configure environment (create .env.local)
-echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
+echo "NEXT_PUBLIC_API_URL=http://localhost:8001" > .env.local
 
 # Start development server
 npm run dev
@@ -367,44 +326,28 @@ npm run dev
 #### 4. Start Backend API
 
 ```bash
-cd Playground/backend
-
 # Start FastAPI server
-python api/main_v2.py
+python aonp/api/main_v2.py
 # Or with uvicorn directly:
-uvicorn api.main_v2:app --reload --host 0.0.0.0 --port 8000
+uvicorn aonp.api.main_v2:app --reload --host 0.0.0.0 --port 8001
 
-# API available at http://localhost:8000
-# API docs at http://localhost:8000/docs
+# API available at http://localhost:8001
+# API docs at http://localhost:8001/docs
 ```
 
 ### Usage Examples
 
-#### Natural Language Query (via API)
+#### Health Check
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/requests" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Simulate a PWR pin cell with 4.5% enriched UO2 fuel at 600K"
-  }'
+curl "http://localhost:8001/health"
 ```
 
-#### Direct Study Submission (YAML)
+#### Geometry Inputs for a Run
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/studies" \
-  -F "file=@aonp/examples/simple_pincell.yaml"
-```
-
-#### Query Simulation Results
-
-```bash
-# Get run by ID
-curl "http://localhost:8000/api/v1/runs/{run_id}"
-
-# Search runs
-curl "http://localhost:8000/api/v1/runs?geometry=pincell&enrichment_min=4.0"
+curl "http://localhost:8001/geometry/runs/{run_id}/files"
+curl "http://localhost:8001/geometry/runs/{run_id}/xml?file=geometry"
 ```
 
 ---
@@ -467,19 +410,15 @@ curl "http://localhost:8000/api/v1/runs?geometry=pincell&enrichment_min=4.0"
 - Audit logging
 - Reproducible execution
 
-### API Endpoints
+### API Endpoints (main_v2)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/requests` | POST | Submit natural language query |
-| `/api/v1/requests/{id}` | GET | Get query status |
-| `/api/v1/requests/{id}/stream` | GET | Stream agent progress (SSE) |
-| `/api/v1/studies` | POST | Submit study directly (YAML) |
-| `/api/v1/runs` | GET | Query simulation runs |
-| `/api/v1/runs/{id}` | GET | Get specific run details |
-| `/api/v1/runs/compare` | POST | Compare multiple runs |
-| `/api/v1/statistics` | GET | Database statistics |
-| `/api/v1/health` | GET | Health check |
+| `/` | GET | API info |
+| `/health` | GET | Health check |
+| `/terminal/stream` | GET | SSE terminal output |
+| `/geometry/runs/{run_id}/files` | GET | List run input XML files |
+| `/geometry/runs/{run_id}/xml` | GET | Fetch XML (`file=geometry|materials|settings`) |
 
 Full API documentation available at `/docs` when server is running.
 
@@ -489,10 +428,10 @@ Full API documentation available at `/docs` when server is running.
 
 ### Core Documentation
 
-- **[openmc_design.md](openmc_design.md)** - Complete OpenMC integration design document
-- **[OPENMC_API_SPEC.md](OPENMC_API_SPEC.md)** - API specification (superseded, see design doc)
-- **[Playground/backend/README_MULTI_AGENT.md](Playground/backend/README_MULTI_AGENT.md)** - Multi-agent system guide
-- **[Playground/backend/README_API.md](Playground/backend/README_API.md)** - Backend API documentation
+- **[docs/README.md](docs/README.md)** - Documentation index
+- **[docs/architecture/ARCHITECTURE_GRAPH.md](docs/architecture/ARCHITECTURE_GRAPH.md)** - Architecture overview
+- **[docs/openmc/README.md](docs/openmc/README.md)** - OpenMC integration
+- **[docs/mongodb/README.md](docs/mongodb/README.md)** - MongoDB setup
 - **[aonp/db/README.md](aonp/db/README.md)** - MongoDB schema and usage
 
 ### Frontend Documentation
@@ -512,7 +451,6 @@ Full API documentation available at `/docs` when server is running.
 ### Backend Tests
 
 ```bash
-cd Playground/backend
 pytest tests/
 ```
 
@@ -560,14 +498,14 @@ LANGCHAIN_PROJECT=aonp
 
 # API Configuration
 API_HOST=0.0.0.0
-API_PORT=8000
+API_PORT=8001
 CORS_ORIGINS=http://localhost:3000
 ```
 
 ### Frontend `.env.local` (in frontend/)
 
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=http://localhost:8001
 ```
 
 ---
@@ -583,7 +521,7 @@ docker build -t aonp-backend -f aonp/runner/Dockerfile .
 ### Run Backend Container
 
 ```bash
-docker run -p 8000:8000 \
+docker run -p 8001:8001 \
   -e MONGODB_URI=mongodb+srv://... \
   -e FIREWORKS_API_KEY=... \
   --env-file .env \

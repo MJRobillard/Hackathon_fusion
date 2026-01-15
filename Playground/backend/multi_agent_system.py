@@ -459,6 +459,8 @@ class StudiesAgent:
         if self.thinking_callback:
             self.thinking_callback.tool_call("Studies Agent", "validate_physics", spec)
         validation = validate_physics(spec)
+        if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+            self.thinking_callback.tool_result("Studies Agent", "validate_physics", validation)
         if not validation["valid"]:
             return {
                 "status": "error",
@@ -835,6 +837,8 @@ class SweepAgent:
         if self.thinking_callback:
             self.thinking_callback.tool_call("Sweep Agent", "validate_physics", sweep_config["base_spec"])
         validation = validate_physics(sweep_config["base_spec"])
+        if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+            self.thinking_callback.tool_result("Sweep Agent", "validate_physics", validation)
         if not validation["valid"]:
             return {
                 "status": "error",
@@ -858,11 +862,15 @@ class SweepAgent:
                 param_name=sweep_config["param_name"],
                 param_values=sweep_config["param_values"]
             )
+            if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+                self.thinking_callback.tool_result("Sweep Agent", "generate_sweep", {"run_ids": run_ids})
             
             # Step 4: Compare results
             if self.thinking_callback:
                 self.thinking_callback.tool_call("Sweep Agent", "compare_runs", {"run_ids": run_ids})
             comparison = compare_runs(run_ids)
+            if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+                self.thinking_callback.tool_result("Sweep Agent", "compare_runs", comparison)
             
             return {
                 "status": "success",
@@ -1056,10 +1064,14 @@ class QueryAgent:
                 if self.thinking_callback:
                     self.thinking_callback.tool_call("Query Agent", "get_recent_runs", {"limit": filters.get("limit", 10)})
                 results = get_recent_runs(limit=filters.get("limit", 10))
+                if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+                    self.thinking_callback.tool_result("Query Agent", "get_recent_runs", results)
             elif filters.get("statistics_only"):
                 if self.thinking_callback:
                     self.thinking_callback.tool_call("Query Agent", "get_study_statistics", {})
                 results = get_study_statistics()
+                if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+                    self.thinking_callback.tool_result("Query Agent", "get_study_statistics", results)
             else:
                 if self.thinking_callback:
                     self.thinking_callback.tool_call(
@@ -1071,6 +1083,8 @@ class QueryAgent:
                     filter_params=filters.get("mongo_filter", {}),
                     limit=filters.get("limit", 10)
                 )
+                if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+                    self.thinking_callback.tool_result("Query Agent", "query_results", results)
             
             return {
                 "status": "success",
@@ -1176,6 +1190,8 @@ class AnalysisAgent:
             if self.thinking_callback:
                 self.thinking_callback.tool_call("Analysis Agent", "compare_runs", {"run_ids": run_ids})
             comparison = compare_runs(run_ids)
+            if self.thinking_callback and hasattr(self.thinking_callback, "tool_result"):
+                self.thinking_callback.tool_result("Analysis Agent", "compare_runs", comparison)
             
             # Step 3: Generate interpretation
             interpretation = self._generate_interpretation(comparison)

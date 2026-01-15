@@ -33,3 +33,8 @@ httpx>=0.25.0  # For FastAPI testing
 black>=23.0.0
 ruff>=0.1.0
 
+# Local LLM support (optional - only needed if RUN_LOCAL=true)
+# Note: Ollama is installed separately as a binary, not via pip
+# See LOCAL_DEEPSEEK_SETUP.md for installation instructions
+# The local_deepseek_client uses stdlib urllib, no Python deps required
+
