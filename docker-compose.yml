@@ -39,12 +39,15 @@ services:
       CORS_ORIGINS: http://localhost:3000
       FIREWORKS: ${FIREWORKS-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
-      OPENMC_CROSS_SECTIONS: /app/nuclear_data/endfb-vii.1-hdf5/cross_sections.xml
+      # OPENMC_CROSS_SECTIONS will be set automatically by start_server.py if nuclear_data exists
+      # If not found, user will be prompted to download it
       RUN_LOCAL: ${RUN_LOCAL:-false}
       LOCAL_DEEPSEEK_URL: http://ollama:11434
     ports:
       - "8000:8000"
     volumes:
+      # Optional: Mount nuclear_data if it exists on host
+      # If not present, the startup script will prompt user to download it
       - ./nuclear_data:/app/nuclear_data:ro
     depends_on:
       - mongo

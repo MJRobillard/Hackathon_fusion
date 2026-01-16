@@ -65,7 +65,44 @@ docker compose logs mongo
 docker compose logs -f backend
 ```
 
-### Step 4: Test the Backend
+### Step 4: Download Nuclear Data (Required for OpenMC Simulations)
+
+**Important**: The nuclear data library (~2-3 GB) is **not included** in the Docker image to keep it lightweight. You need to download it separately.
+
+The backend will start without it, but OpenMC simulations will fail. You'll see a helpful prompt when starting the backend if nuclear data is missing.
+
+**Option 1: Download inside the container (Recommended)**
+```bash
+# Make sure backend container is running
+docker compose up -d backend
+
+# Download nuclear data (takes several minutes)
+docker compose exec backend python -c 'import openmc; openmc.data.download_endfb71()'
+
+# Restart backend to pick up the data
+docker compose restart backend
+```
+
+**Option 2: Use the helper script**
+```bash
+# Copy script into container and run
+docker compose exec backend bash -c 'bash <(cat download-nuclear-data.sh)'
+```
+
+**Option 3: Download on host and mount**
+```bash
+# On your host machine
+mkdir -p ./nuclear_data && cd ./nuclear_data
+python -c 'import openmc; openmc.data.download_endfb71()'
+
+# The volume mount in docker-compose.yml will make it available to the container
+# Restart backend
+docker compose restart backend
+```
+
+**Note**: The download is ~2-3 GB and may take 5-15 minutes depending on your internet connection.
+
+### Step 5: Test the Backend
 
 ```bash
 # Health check
@@ -84,7 +121,7 @@ Expected response:
 }
 ```
 
-### Step 5: Access API Documentation
+### Step 6: Access API Documentation
 
 - **Interactive Docs (Swagger)**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
@@ -184,6 +221,32 @@ netstat -ano | findstr :8000
 
 # Stop the conflicting service or change the port in docker-compose.yml
 ```
+
+### Nuclear Data Not Found
+
+If you see warnings about missing nuclear data when starting the backend:
+
+1. **Check if nuclear_data directory exists in container**:
+   ```bash
+   docker compose exec backend ls -la /app/nuclear_data/endfb-vii.1-hdf5/
+   ```
+
+2. **Download nuclear data** (see Step 4 above):
+   ```bash
+   docker compose exec backend python -c 'import openmc; openmc.data.download_endfb71()'
+   ```
+
+3. **Verify the download**:
+   ```bash
+   docker compose exec backend ls -la /app/nuclear_data/endfb-vii.1-hdf5/cross_sections.xml
+   ```
+
+4. **Restart backend**:
+   ```bash
+   docker compose restart backend
+   ```
+
+**Note**: The nuclear data is stored inside the container. If you remove the container, you'll need to download it again. To persist it, download on the host and mount it via the volume in `docker-compose.yml`.
 
 ### MongoDB Connection Issues
 
