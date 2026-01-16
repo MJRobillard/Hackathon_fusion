@@ -21,7 +21,7 @@ export function ExecutionLogs({ logs, autoScroll = true, onClear }: ExecutionLog
     }
   }, [logs, autoScroll]);
 
-  const getLogColor = (level: string, source: string) => {
+  const getLogColor = (level: string | undefined, source: string) => {
     if (level === 'error') return 'text-red-400';
     if (level === 'warning') return 'text-yellow-400';
     if (level === 'success') return 'text-emerald-400';

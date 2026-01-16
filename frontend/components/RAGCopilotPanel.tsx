@@ -278,9 +278,9 @@ export default function RAGCopilotPanel({ queryId, activeQuery }: RAGCopilotPane
                       </div>
                     )}
                     
-                    <div className="text-xs text-gray-500 mt-1.5">
-                      {formatDate(experiment.created_at)}
-                    </div>
+                     <div className="text-xs text-gray-500 mt-1.5">
+                       {experiment.created_at ? formatDate(experiment.created_at) : 'No date'}
+                     </div>
                   </button>
                 ))}
               </div>
@@ -493,12 +493,12 @@ export default function RAGCopilotPanel({ queryId, activeQuery }: RAGCopilotPane
                    <div>
                      <div className="text-sm font-medium text-purple-300">Research Papers Read</div>
                      <div className="text-xs text-purple-400/70">
-                       {ragStats.collections.papers.description}
+                       {ragStats.collections?.papers?.description || 'N/A'}
                      </div>
                    </div>
                  </div>
                  <div className="text-2xl font-bold text-purple-300">
-                   {ragStats.collections.papers.count}
+                   {ragStats.collections?.papers?.count || 0}
                  </div>
                </div>
                <div className="text-xs text-purple-400/60 mt-2">
@@ -514,12 +514,12 @@ export default function RAGCopilotPanel({ queryId, activeQuery }: RAGCopilotPane
                    <div>
                      <div className="text-sm font-medium text-blue-300">Studies Learned From</div>
                      <div className="text-xs text-blue-400/70">
-                       {ragStats.collections.runs.description}
+                       {ragStats.collections?.runs?.description || 'N/A'}
                      </div>
                    </div>
                  </div>
                  <div className="text-2xl font-bold text-blue-300">
-                   {ragStats.collections.runs.count}
+                   {ragStats.collections?.runs?.count || 0}
                  </div>
                </div>
                <div className="text-xs text-blue-400/60 mt-2">
@@ -531,9 +531,9 @@ export default function RAGCopilotPanel({ queryId, activeQuery }: RAGCopilotPane
              <div className="p-4 bg-gray-900/50 border border-gray-800 rounded-lg">
                <div className="text-xs text-gray-400 mb-2">RAG Method</div>
                <div className="flex items-center justify-between">
-                 <div className="text-sm text-gray-300">{ragStats.vector_store.type}</div>
+                 <div className="text-sm text-gray-300">{ragStats.vector_store?.type || 'N/A'}</div>
                  <div className="text-xs text-gray-500">
-                   {ragStats.vector_store.location}
+                   {ragStats.vector_store?.location || 'N/A'}
                  </div>
                </div>
              </div>
@@ -638,11 +638,11 @@ export default function RAGCopilotPanel({ queryId, activeQuery }: RAGCopilotPane
             )}
           </div>
           <div className="text-gray-600 font-mono">
-            {ragStats && (
-              <>
-                {ragStats.collections.papers.count}P + {ragStats.collections.runs.count}R
-              </>
-            )}
+             {ragStats && (
+               <>
+                 {ragStats.collections?.papers?.count || 0}P + {ragStats.collections?.runs?.count || 0}R
+               </>
+             )}
           </div>
         </div>
 
