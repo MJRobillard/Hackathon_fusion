@@ -14,7 +14,7 @@ export function ParameterSweepChart({
   width = 500,
   height = 350,
 }: ParameterSweepChartProps) {
-  const { parameter_name, parameter_values, keff_values, keff_stds, trend_line } = data;
+  const { parameter, values: parameter_values, keff: keff_values, keff_std: keff_stds } = data;
 
   // Calculate chart dimensions and scaling
   const padding = { top: 20, right: 50, bottom: 50, left: 60 };
@@ -40,7 +40,7 @@ export function ParameterSweepChart({
   };
 
   // Format parameter name for display
-  const paramLabel = parameter_name
+  const paramLabel = parameter
     .replace(/_/g, ' ')
     .replace(/pct/g, '%')
     .replace(/\b\w/g, (l) => l.toUpperCase());
@@ -54,12 +54,6 @@ export function ParameterSweepChart({
         <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wide">
           Parameter Sweep: {paramLabel}
         </h3>
-        {trend_line && (
-          <p className="text-[10px] text-gray-500 mt-1">
-            Slope: {trend_line.slope.toFixed(6)} Δk/Δ{paramLabel.split(' ')[0].toLowerCase()}
-            {trend_line.slope > 0 ? ' (positive)' : trend_line.slope < 0 ? ' (negative)' : ' (neutral)'}
-          </p>
-        )}
       </div>
 
       <svg width={width} height={height} className="overflow-visible">
@@ -120,23 +114,6 @@ export function ParameterSweepChart({
             );
           })}
 
-          {/* Trend line */}
-          {trend_line && trend_line.values.length > 0 && (
-            <path
-              d={parameter_values
-                .map((param, idx) => {
-                  const x = scaleX(param);
-                  const y = scaleY(trend_line.values[idx]);
-                  return idx === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
-                })
-                .join(' ')}
-              fill="none"
-              stroke="#10b981"
-              strokeWidth="2"
-              strokeDasharray="4,2"
-              opacity="0.7"
-            />
-          )}
 
           {/* Error bars and data points */}
           {parameter_values.map((param, idx) => {
@@ -261,12 +238,6 @@ export function ParameterSweepChart({
           <div className="w-3 h-3 rounded-full bg-blue-500"></div>
           <span>Subcritical (k &lt; 0.99)</span>
         </div>
-        {trend_line && (
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-0.5 bg-emerald-500 border-dashed"></div>
-            <span>Trend line</span>
-          </div>
-        )}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ No bash/permissions needed!
 import os
 import sys
 from pathlib import Path
+import traceback
 
 # Load .env if it exists
 try:
@@ -14,6 +15,18 @@ try:
     load_dotenv()
 except:
     pass
+
+# Set nuclear data path (relative to project root)
+script_dir = Path(__file__).parent
+project_root = script_dir.parent.parent
+nuclear_data_path = project_root / "nuclear_data" / "endfb-vii.1-hdf5" / "cross_sections.xml"
+
+if nuclear_data_path.exists():
+    os.environ["OPENMC_CROSS_SECTIONS"] = str(nuclear_data_path)
+    print(f"✓ OPENMC_CROSS_SECTIONS set to: {nuclear_data_path}")
+elif not os.getenv("OPENMC_CROSS_SECTIONS"):
+    print(f"⚠️  WARNING: Nuclear data not found at expected path: {nuclear_data_path}")
+    print("   Please set OPENMC_CROSS_SECTIONS environment variable manually")
 
 # Check MongoDB
 if not os.getenv("MONGO_URI"):
@@ -53,7 +66,42 @@ print("")
 if __name__ == "__main__":
     # Start server
     try:
-        import uvicorn
+        # Debug: Show Python info
+        import sys
+        print(f"DEBUG: Python executable: {sys.executable}")
+        print(f"DEBUG: Python version: {sys.version}")
+        print(f"DEBUG: Python path: {sys.path[:5]}...")  # Show first 5 entries
+        
+        # Try to find uvicorn
+        import importlib.util
+        uvicorn_path = None
+        for path in sys.path:
+            potential = f"{path}/uvicorn"
+            if importlib.util.find_spec("uvicorn") is not None:
+                spec = importlib.util.find_spec("uvicorn")
+                if spec and spec.origin:
+                    uvicorn_path = spec.origin
+                    print(f"DEBUG: Found uvicorn at: {uvicorn_path}")
+                    break
+        
+        if not uvicorn_path:
+            print(f"DEBUG: uvicorn not found in sys.path")
+            print(f"DEBUG: Checking site-packages...")
+            import site
+            print(f"DEBUG: site.getsitepackages(): {site.getsitepackages()}")
+        
+        try:
+            import uvicorn
+        except ModuleNotFoundError as exc:
+            # Only treat missing `uvicorn` as a uvicorn install problem; other import
+            # errors should be surfaced clearly.
+            if getattr(exc, "name", None) == "uvicorn":
+                print("❌ ERROR: uvicorn not installed")
+                print("Install with: pip install uvicorn")
+                sys.exit(1)
+            raise
+
+        print(f"DEBUG: Successfully imported uvicorn {uvicorn.__version__}")
         
         # Change to API directory
         api_dir = Path(__file__).parent / "api"
@@ -63,9 +111,21 @@ if __name__ == "__main__":
         # directory, not the chdir() target).
         if str(api_dir) not in sys.path:
             sys.path.insert(0, str(api_dir))
+
+        # Preflight import so we fail with a useful traceback if the app module
+        # (or any of its dependencies) is missing/broken.
+        try:
+            import importlib
+            importlib.import_module("main_v2")
+        except Exception:
+            print("❌ ERROR: Failed to import API module `main_v2` (or one of its dependencies).")
+            traceback.print_exc()
+            sys.exit(1)
         
         # Detect if running on Windows (disable reload to avoid multiprocessing issues)
-        is_windows = sys.platform.startswith('win') or 'microsoft' in os.uname().release.lower()
+        is_windows = sys.platform.startswith("win") or (
+            hasattr(os, "uname") and "microsoft" in os.uname().release.lower()
+        )
         use_reload = not is_windows
         
         if is_windows:
@@ -73,17 +133,23 @@ if __name__ == "__main__":
             print("")
         
         # Run server
-        uvicorn.run(
-            "main_v2:app",
-            host=os.getenv("API_HOST", "0.0.0.0"),
-            port=int(os.getenv("API_PORT", "8000")),
-            reload=use_reload,
-            log_level="info"
-        )
+        try:
+            uvicorn.run(
+                "main_v2:app",
+                host=os.getenv("API_HOST", "0.0.0.0"),
+                port=int(os.getenv("API_PORT", "8000")),
+                reload=use_reload,
+                log_level="info",
+            )
+        except Exception:
+            print("❌ ERROR: Uvicorn failed to start.")
+            traceback.print_exc()
+            sys.exit(1)
         
     except ImportError:
-        print("❌ ERROR: uvicorn not installed")
-        print("Install with: pip install uvicorn")
+        # Keep a helpful message, but don't hide the underlying cause.
+        print("❌ ERROR: ImportError during server startup.")
+        traceback.print_exc()
         sys.exit(1)
     except KeyboardInterrupt:
         print("\n\n✓ Server stopped")

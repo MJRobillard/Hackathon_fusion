@@ -150,7 +150,7 @@ export function ResultsPanel({ results, analysis, suggestions }: ResultsPanelPro
               Individual Results
             </div>
             <div className="space-y-1 max-h-48 overflow-y-auto">
-              {results.keff_values.map((keff, index) => {
+              {results.keff_values.map((keff: number, index: number) => {
                 const status = getCriticalityStatus(keff);
                 return (
                   <div

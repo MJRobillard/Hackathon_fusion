@@ -95,11 +95,30 @@ def _create_llm():
             object.__setattr__(llm, "model", model_name)
             object.__setattr__(llm, "temperature", temperature)
             return llm
-        except ImportError:
-            print("⚠️  Warning: langchain-openai not available, falling back to Fireworks")
+        except ImportError as e:
+            import traceback
+            print(f"⚠️  ERROR: langchain-openai not available (required for RUN_LOCAL=true)")
+            print(f"   Install with: pip install langchain-openai")
+            print(f"   ImportError: {e}")
+            if os.getenv("FIREWORKS"):
+                print("⚠️  Falling back to Fireworks API (local DeepSeek unavailable)")
+                traceback.print_exc()
+            else:
+                raise RuntimeError(
+                    "RUN_LOCAL=true requires langchain-openai. "
+                    "Either install langchain-openai or set FIREWORKS API key."
+                ) from e
             # Fall through to Fireworks
         except Exception as e:
-            print(f"⚠️  Warning: Local DeepSeek setup failed ({e}), falling back to Fireworks")
+            import traceback
+            print(f"⚠️  ERROR: Local DeepSeek setup failed ({e})")
+            traceback.print_exc()
+            if os.getenv("FIREWORKS"):
+                print("⚠️  Falling back to Fireworks API")
+            else:
+                raise RuntimeError(
+                    f"RUN_LOCAL=true failed and no FIREWORKS key available: {e}"
+                ) from e
             # Fall through to Fireworks
     
     # Use Fireworks API (default)
@@ -280,26 +299,40 @@ class RouterAgent:
                 system_prompt = """You are a routing agent for nuclear simulation requests.
 
 Classify the user's request into ONE of these categories:
-1. "single_study" - User wants to run ONE specific simulation
+1. "single_study" - User wants to run ONE specific simulation with FIXED parameter values
+   - Examples: "Simulate PWR at 4.5% enrichment", "Run simulation with temperature 600K"
+   - Key indicator: A SINGLE value for a parameter (e.g., "4.5%", "600K", "at 3%")
 2. "sweep" - User wants to VARY a parameter and run MULTIPLE simulations
+   - Examples: "Sweep enrichment from 3% to 5%", "Vary temperature 300K to 900K", "Run at 3%, 4%, 5% enrichment"
+   - Key indicators: Multiple values, ranges (from/to), lists of values, words like "sweep", "vary", "range"
 3. "query" - User wants to SEARCH or LIST past results
 4. "analysis" - User wants to ANALYZE or COMPARE specific runs
+
+CRITICAL RULE: If the request mentions only ONE value for a parameter (e.g., "at 4.5%", "with 600K"), 
+it is ALWAYS "single_study", NOT "sweep". A sweep requires MULTIPLE values or a range.
 
 CRITICAL: Respond with ONLY the category name. No explanations, no reasoning, no markdown, no additional text."""
         else:
             system_prompt = """You are a routing agent for nuclear simulation requests.
 
 Classify the user's request into ONE of these categories:
-1. "single_study" - User wants to run ONE specific simulation
+1. "single_study" - User wants to run ONE specific simulation with FIXED parameter values
+   - Examples: "Simulate PWR at 4.5% enrichment", "Run simulation with temperature 600K"
+   - Key indicator: A SINGLE value for a parameter (e.g., "4.5%", "600K", "at 3%")
 2. "sweep" - User wants to VARY a parameter and run MULTIPLE simulations
+   - Examples: "Sweep enrichment from 3% to 5%", "Vary temperature 300K to 900K", "Run at 3%, 4%, 5% enrichment"
+   - Key indicators: Multiple values, ranges (from/to), lists of values, words like "sweep", "vary", "range"
 3. "query" - User wants to SEARCH or LIST past results
 4. "analysis" - User wants to ANALYZE or COMPARE specific runs
 
-CRITICAL: Respond with ONLY the category name. No explanations, no reasoning, no markdown, no additional text.
+CRITICAL RULE: If the request mentions only ONE value for a parameter (e.g., "at 4.5%", "with 600K"), 
+it is ALWAYS "single_study", NOT "sweep". A sweep requires MULTIPLE values or a range.
+
 Examples:
-- Input: "Run parameter sweep for enrichment 3% to 5%" → Output: "sweep"
+- Input: "Run parameter sweep for enrichment 3% to 5%" → Output: "sweep" (has range: 3% to 5%)
+- Input: "Simulate PWR at 4.5% enrichment" → Output: "single_study" (single value: 4.5%)
 - Input: "Show me recent runs" → Output: "query"
-- Input: "Simulate a PWR pin cell" → Output: "single_study"
+- Input: "Simulate a PWR pin cell" → Output: "single_study" (no parameter variation)
 - Input: "Compare run_123 and run_456" → Output: "analysis"
 
 Your response must be exactly one word: single_study, sweep, query, or analysis."""
@@ -991,6 +1024,21 @@ class SweepAgent:
         if self.thinking_callback:
             self.thinking_callback.observation("Sweep Agent", "Sweep configuration extracted", {"sweep_config": sweep_config})
         
+        # Step 1.5: Validate that this is actually a sweep (has multiple values)
+        param_values = sweep_config.get("param_values", [])
+        if not param_values or len(param_values) < 2:
+            error_msg = f"Invalid sweep: parameter '{sweep_config.get('param_name', 'unknown')}' has only {len(param_values)} value(s). A sweep requires at least 2 different values."
+            if self.thinking_callback:
+                self.thinking_callback.observation("Sweep Agent", "Validation failed: single value detected", {
+                    "param_values": param_values,
+                    "error": error_msg
+                })
+            return {
+                "status": "error",
+                "error": error_msg,
+                "suggestion": "This appears to be a single study request, not a parameter sweep. Please use the studies agent for single simulations."
+            }
+        
         # Step 2: Validate base spec
         if self.thinking_callback:
             self.thinking_callback.tool_call("Sweep Agent", "validate_physics", sweep_config["base_spec"])
@@ -1069,10 +1117,20 @@ Output ONLY valid JSON with this structure:
         "batches": int
     },
     "param_name": "name of parameter to vary (e.g., enrichment_pct, temperature_K)",
-    "param_values": [list, of, values, to, sweep]
+    "param_values": [list, of, MULTIPLE, values, to, sweep]
 }
 
-Generate sensible sweep ranges (e.g., 3-5% enrichment, 300-900K temperature).
+CRITICAL REQUIREMENTS:
+1. param_values MUST contain AT LEAST 2 different values (a sweep requires multiple runs)
+2. If the user specifies a range (e.g., "3% to 5%"), generate 3-5 evenly spaced values
+3. If the user specifies a single value, this is NOT a sweep - return an error or generate a sensible range around that value
+4. Minimum recommended: 3-5 values for meaningful sweep analysis
+
+Examples:
+- User: "sweep enrichment 3% to 5%" → param_values: [3.0, 3.5, 4.0, 4.5, 5.0]
+- User: "vary temperature 300K to 900K" → param_values: [300, 450, 600, 750, 900]
+- User: "run at 3%, 4%, 5%" → param_values: [3.0, 4.0, 5.0]
+
 Output JSON only, no explanation."""
         
         messages = [
@@ -1133,8 +1191,18 @@ Output JSON only, no explanation."""
                 step = (end - start) / 4
                 param_values = [start + i * step for i in range(5)]
             else:
-                # Default temperature sweep
-                param_values = [300, 450, 600, 750, 900]
+                # Check for single temperature value - this is NOT a sweep
+                single_temp_pattern = r'(\d+)\s*k(?!\s*(?:to|through|-))'
+                single_match = re.search(single_temp_pattern, query_lower)
+                if single_match:
+                    # Found only one value - this should have been routed to single_study
+                    raise ValueError(f"Single temperature value detected ({single_match.group(1)}K). This is not a sweep. Request should be routed to single_study agent.")
+                # Only generate default if query explicitly mentions sweep/vary/range
+                if any(word in query_lower for word in ["sweep", "vary", "range", "from", "to", "between"]):
+                    param_values = [300, 450, 600, 750, 900]
+                else:
+                    # No sweep indicators - this shouldn't be a sweep
+                    raise ValueError("No temperature range found and no sweep keywords detected. This may be misrouted.")
         
         # Check if sweeping enrichment (default)
         else:
@@ -1161,10 +1229,27 @@ Output JSON only, no explanation."""
                 matches = re.findall(r'(\d+\.?\d*)\s*%?', query_lower)
                 if matches:
                     param_values = [float(m) for m in matches if 0 < float(m) < 100]
+                    # Only use if we have at least 2 values
+                    if len(param_values) < 2:
+                        param_values = []
             
-            # Default enrichment sweep if nothing found
+            # Check if we found only a single value - this is NOT a sweep
             if not param_values:
-                param_values = [3.0, 3.5, 4.0, 4.5, 5.0]
+                # Try to extract a single value to detect single-value requests
+                single_value_pattern = r'(\d+\.?\d*)\s*%'
+                single_match = re.search(single_value_pattern, query_lower)
+                if single_match:
+                    # Found only one value - this should have been routed to single_study
+                    raise ValueError(f"Single value detected ({single_match.group(1)}%). This is not a sweep. Request should be routed to single_study agent.")
+            
+            # Default enrichment sweep if nothing found (only if we're sure it's a sweep request)
+            if not param_values:
+                # Only generate default if query explicitly mentions sweep/vary/range
+                if any(word in query_lower for word in ["sweep", "vary", "range", "from", "to", "between"]):
+                    param_values = [3.0, 3.5, 4.0, 4.5, 5.0]
+                else:
+                    # No sweep indicators and no values found - this shouldn't be a sweep
+                    raise ValueError("No parameter values found and no sweep keywords detected. This may be misrouted.")
         
         return {
             "base_spec": base_spec,

@@ -61,6 +61,8 @@ class StreamingSimulationRunner:
         """Configure environment variables for OpenMC."""
         # Set nuclear data path
         nuclear_data_ref = self.run_dir / "nuclear_data.ref.json"
+        cross_sections_set = False
+        
         if nuclear_data_ref.exists():
             with open(nuclear_data_ref) as f:
                 nd_config = json.load(f)
@@ -68,12 +70,27 @@ class StreamingSimulationRunner:
             cross_sections_xml = Path(nd_config['cross_sections_path'])
             if cross_sections_xml.exists():
                 os.environ['OPENMC_CROSS_SECTIONS'] = str(cross_sections_xml)
+                cross_sections_set = True
+            else:
+                # Try to use existing environment variable as fallback
+                if 'OPENMC_CROSS_SECTIONS' in os.environ:
+                    env_path = Path(os.environ['OPENMC_CROSS_SECTIONS'])
+                    if env_path.exists():
+                        cross_sections_set = True
+        
+        # Fallback: use existing environment variable if not set from ref file
+        if not cross_sections_set and 'OPENMC_CROSS_SECTIONS' in os.environ:
+            env_path = Path(os.environ['OPENMC_CROSS_SECTIONS'])
+            if env_path.exists():
+                cross_sections_set = True
         
         # Configure threading
         if 'OMP_NUM_THREADS' not in os.environ:
             import multiprocessing
             threads = max(1, multiprocessing.cpu_count() - 2)
             os.environ['OMP_NUM_THREADS'] = str(threads)
+        
+        return cross_sections_set
     
     def stream_simulation(self) -> Generator[str, None, None]:
         """
@@ -92,7 +109,26 @@ class StreamingSimulationRunner:
         manifest = self.load_manifest()
         
         # Setup environment
-        self.setup_environment(manifest)
+        cross_sections_set = self.setup_environment(manifest)
+        
+        # Check if nuclear data is configured
+        if not cross_sections_set:
+            yield "\n[ERROR] Nuclear data (cross_sections.xml) not found!\n"
+            yield "Please ensure one of the following:\n"
+            yield "  1. nuclear_data.ref.json exists with valid cross_sections_path\n"
+            yield "  2. OPENMC_CROSS_SECTIONS environment variable is set\n"
+            nuclear_data_ref = self.run_dir / "nuclear_data.ref.json"
+            if nuclear_data_ref.exists():
+                with open(nuclear_data_ref) as f:
+                    nd_config = json.load(f)
+                yield f"  Expected path: {nd_config.get('cross_sections_path', 'N/A')}\n"
+            if 'OPENMC_CROSS_SECTIONS' in os.environ:
+                yield f"  Environment variable set to: {os.environ['OPENMC_CROSS_SECTIONS']}\n"
+            yield "\n"
+            manifest['status'] = 'failed'
+            manifest['error'] = 'Nuclear data (cross_sections.xml) not found'
+            self.save_manifest(manifest)
+            return
         
         # Create outputs directory
         self.outputs_dir.mkdir(exist_ok=True)
@@ -137,6 +173,9 @@ class StreamingSimulationRunner:
         
         # Execute simulation with real-time output
         try:
+            # Prepare environment for subprocess (inherit current env with OPENMC_CROSS_SECTIONS)
+            env = os.environ.copy()
+            
             # Run OpenMC as subprocess to capture stdout
             process = subprocess.Popen(
                 [
@@ -144,6 +183,7 @@ class StreamingSimulationRunner:
                     f'''
 import openmc
 import sys
+import os
 sys.stdout.flush()
 openmc.run(cwd="{self.inputs_dir}", output=True)
 '''
@@ -152,7 +192,8 @@ openmc.run(cwd="{self.inputs_dir}", output=True)
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                env=env
             )
             
             # Stream output line by line

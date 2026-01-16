@@ -1,10 +1,12 @@
 """
 Result extraction from OpenMC HDF5 outputs to structured data formats.
+
+Note: `pandas` is an optional dependency. The core API boot path imports this
+module to access `extract_results()`, which does not require pandas.
 """
 
-import pandas as pd
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 
 def extract_results(statepoint_path: Path) -> Dict[str, Any]:
@@ -75,6 +77,14 @@ def create_summary(statepoint_path: Path, output_path: Optional[Path] = None) ->
                   results['n_particles']]
     }
     
+    try:
+        import pandas as pd  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "Optional dependency missing: pandas is required for create_summary(). "
+            "Install with: pip install pandas"
+        ) from exc
+
     df = pd.DataFrame(summary_data)
     
     # Determine output path
@@ -110,6 +120,14 @@ def export_batch_statistics(statepoint_path: Path, output_path: Optional[Path] =
     
     sp = openmc.StatePoint(str(statepoint_path))
     
+    try:
+        import pandas as pd  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "Optional dependency missing: pandas is required for export_batch_statistics(). "
+            "Install with: pip install pandas"
+        ) from exc
+
     # Create per-batch DataFrame
     df = pd.DataFrame({
         'batch': range(1, sp.n_batches + 1),
@@ -131,7 +149,7 @@ def export_batch_statistics(statepoint_path: Path, output_path: Optional[Path] =
     return output_path
 
 
-def load_summary(parquet_path: Path) -> pd.DataFrame:
+def load_summary(parquet_path: Path):
     """
     Load summary DataFrame from Parquet file.
     
@@ -141,5 +159,13 @@ def load_summary(parquet_path: Path) -> pd.DataFrame:
     Returns:
         DataFrame with summary metrics
     """
+    try:
+        import pandas as pd  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "Optional dependency missing: pandas is required for load_summary(). "
+            "Install with: pip install pandas"
+        ) from exc
+
     return pd.read_parquet(parquet_path)
 

@@ -10,7 +10,7 @@ motor==3.3.2  # Async MongoDB driver
 pymongo==4.6.1
 
 # Models and validation
-pydantic==2.5.3
+pydantic>=2.7.4,<3.0.0
 pydantic-settings==2.1.0
 
 # Environment and configuration
@@ -21,9 +21,10 @@ slowapi==0.1.9  # Rate limiting
 
 # Existing AONP dependencies
 langchain==0.3.26
-langchain-fireworks==0.2.10
+langchain-fireworks==0.2.9
+langchain-openai>=0.0.5  # Required for RUN_LOCAL=true (local DeepSeek via Ollama)
 langgraph==1.0.1
-voyageai==0.5.0
+voyageai==0.3.7
 
 # RAG System
 chromadb==0.4.22
@@ -37,3 +38,5 @@ httpx==0.26.0  # For async testing
 # Monitoring (optional)
 prometheus-client==0.19.0
 
+# OpenMC is installed in Docker via conda-forge (micromamba) because it's not reliably
+# available on PyPI for all Linux/Python combinations. See `Playground/backend/Dockerfile`.

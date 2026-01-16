@@ -54,17 +54,46 @@ def run_simulation(run_dir: Path, *, enable_rerun_agent: bool = True) -> int:
     
     # Set nuclear data path
     nuclear_data_ref = run_dir / "nuclear_data.ref.json"
+    cross_sections_set = False
+    
     if nuclear_data_ref.exists():
         with open(nuclear_data_ref) as f:
             nd_config = json.load(f)
         
         cross_sections_xml = Path(nd_config['cross_sections_path'])
-        if not cross_sections_xml.exists():
+        if cross_sections_xml.exists():
+            os.environ['OPENMC_CROSS_SECTIONS'] = str(cross_sections_xml)
+            cross_sections_set = True
+            print(f"Nuclear data: {nd_config['library']}")
+            print(f"  Path: {cross_sections_xml}")
+        else:
             print(f"[WARNING] Nuclear data not found: {cross_sections_xml}")
             print(f"[WARNING] Attempting to use OPENMC_CROSS_SECTIONS environment variable")
+            # Check if environment variable is already set and points to valid file
+            if 'OPENMC_CROSS_SECTIONS' in os.environ:
+                env_path = Path(os.environ['OPENMC_CROSS_SECTIONS'])
+                if env_path.exists():
+                    cross_sections_set = True
+                    print(f"[OK] Using environment variable: {env_path}")
+    
+    # Fallback: use existing environment variable if not set from ref file
+    if not cross_sections_set:
+        if 'OPENMC_CROSS_SECTIONS' in os.environ:
+            env_path = Path(os.environ['OPENMC_CROSS_SECTIONS'])
+            if env_path.exists():
+                cross_sections_set = True
+                print(f"[OK] Using OPENMC_CROSS_SECTIONS: {env_path}")
+            else:
+                print(f"[ERROR] OPENMC_CROSS_SECTIONS points to non-existent file: {env_path}")
         else:
-            os.environ['OPENMC_CROSS_SECTIONS'] = str(cross_sections_xml)
-            print(f"Nuclear data: {nd_config['library']}")
+            print("[ERROR] No nuclear data configuration found!")
+            print("  Please set OPENMC_CROSS_SECTIONS environment variable or")
+            print("  ensure nuclear_data.ref.json points to valid cross_sections.xml")
+            return 1
+    
+    if not cross_sections_set:
+        print("[ERROR] Cannot find valid nuclear data (cross_sections.xml)")
+        return 1
     
     # Configure threading
     if 'OMP_NUM_THREADS' not in os.environ:

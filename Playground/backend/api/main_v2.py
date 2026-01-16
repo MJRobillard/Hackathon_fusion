@@ -885,7 +885,8 @@ async def stream_terminal_output():
         q = terminal_broadcaster.subscribe()
         try:
             # Initial connection message
-            yield f"data: {json.dumps({'timestamp': _utc_now_iso(), 'stream': 'system', 'content': '[Connected to terminal stream]\\n'})}\n\n"
+            content_msg = '[Connected to terminal stream]\n'
+            yield f"data: {json.dumps({'timestamp': _utc_now_iso(), 'stream': 'system', 'content': content_msg})}\n\n"
             while True:
                 try:
                     evt = await asyncio.wait_for(q.get(), timeout=30.0)

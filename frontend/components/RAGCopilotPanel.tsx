@@ -135,10 +135,10 @@ export default function RAGCopilotPanel({ queryId, activeQuery }: RAGCopilotPane
       
       // Also update the ragResponse for the old UI if needed
       setRagResponse({
-        query: userMessage.content,
-        result: response.result,
-        intent: response.intent,
-      } as RAGResponse);
+        answer: response.result || '',
+        sources: response.sources || [],
+        query_id: response.query_id,
+      });
     } catch (err) {
       console.error('Failed to send message:', err);
       setError(err instanceof Error ? err.message : 'Failed to send message');
