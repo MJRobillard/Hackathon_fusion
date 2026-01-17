@@ -29,7 +29,8 @@ ENV PATH=/opt/micromamba/envs/app/bin:$PATH
 # Install dependencies first
 COPY Playground/backend/api/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r /app/requirements.txt
+    pip install --no-cache-dir -r /app/requirements.txt && \
+    pip install --no-cache-dir openmc_data_downloader
 
 # Verify uvicorn installation with both python and python3
 RUN python -c "import uvicorn; print(f'✓ uvicorn {uvicorn.__version__} installed (python)')" && \

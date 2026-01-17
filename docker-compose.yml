@@ -48,7 +48,8 @@ services:
     volumes:
       # Optional: Mount nuclear_data if it exists on host
       # If not present, the startup script will prompt user to download it
-      - ./nuclear_data:/app/nuclear_data:ro
+      # Writable volume allows downloading data inside container
+      - ./nuclear_data:/app/nuclear_data
     depends_on:
       - mongo
       - ollama

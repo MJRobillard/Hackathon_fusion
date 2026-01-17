@@ -512,21 +512,28 @@ NEXT_PUBLIC_API_URL=http://localhost:8001
 
 ## 🐳 Docker Usage
 
-### Build Backend Image
+### Docker Compose (Recommended)
+
+From the project root:
 
 ```bash
-docker build -t aonp-backend -f aonp/runner/Dockerfile .
+docker compose up --build
 ```
 
-### Run Backend Container
+#### Nuclear data (required for OpenMC simulations)
+
+The backend will start without nuclear data, but OpenMC runs will fail until you download it. If `./nuclear_data/endfb-vii.1-hdf5/cross_sections.xml` is missing, the backend logs print a copy/paste prompt.
+
+Recommended download (into the default bind mount `./nuclear_data:/app/nuclear_data`):
 
 ```bash
-docker run -p 8001:8001 \
-  -e MONGODB_URI=mongodb+srv://... \
-  -e FIREWORKS_API_KEY=... \
-  --env-file .env \
-  aonp-backend
+docker compose exec backend bash download-nuclear-data-openmc-downloader.sh
+docker compose restart backend
 ```
+
+#### Ollama + model pull
+
+`docker compose up` will pull the `ollama/ollama:latest` image automatically if it isn’t present. On startup, the compose configuration also runs `ollama pull deepseek-r1:1.5b` (if missing).
 
 ---
 

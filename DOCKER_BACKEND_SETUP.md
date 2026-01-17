@@ -71,7 +71,22 @@ docker compose logs -f backend
 
 The backend will start without it, but OpenMC simulations will fail. You'll see a helpful prompt when starting the backend if nuclear data is missing.
 
-**Option 1: Download inside the container (Recommended)**
+**Option 1: Using openmc_data_downloader (Recommended)**
+```bash
+# Make sure backend container is running
+docker compose up -d backend
+
+# Download nuclear data using openmc_data_downloader (takes several minutes)
+docker compose exec backend openmc_data_downloader install --dest /app/nuclear_data
+
+# Or use the helper script
+docker compose exec backend bash download-nuclear-data-openmc-downloader.sh
+
+# Restart backend to pick up the data
+docker compose restart backend
+```
+
+**Option 2: Using Python openmc.data (Fallback)**
 ```bash
 # Make sure backend container is running
 docker compose up -d backend
@@ -83,17 +98,18 @@ docker compose exec backend python -c 'import openmc; openmc.data.download_endfb
 docker compose restart backend
 ```
 
-**Option 2: Use the helper script**
+**Option 3: Use the helper script**
 ```bash
 # Copy script into container and run
-docker compose exec backend bash -c 'bash <(cat download-nuclear-data.sh)'
+docker compose exec backend bash -c 'bash <(cat download-nuclear-data-openmc-downloader.sh)'
 ```
 
-**Option 3: Download on host and mount**
+**Option 4: Download on host and mount**
 ```bash
 # On your host machine
 mkdir -p ./nuclear_data && cd ./nuclear_data
-python -c 'import openmc; openmc.data.download_endfb71()'
+openmc_data_downloader install --dest ./nuclear_data
+# Or: python -c 'import openmc; openmc.data.download_endfb71()'
 
 # The volume mount in docker-compose.yml will make it available to the container
 # Restart backend
@@ -246,7 +262,7 @@ If you see warnings about missing nuclear data when starting the backend:
    docker compose restart backend
    ```
 
-**Note**: The nuclear data is stored inside the container. If you remove the container, you'll need to download it again. To persist it, download on the host and mount it via the volume in `docker-compose.yml`.
+**Note**: With the default `docker-compose.yml` bind mount (`./nuclear_data:/app/nuclear_data`), the nuclear data is persisted on your host in `./nuclear_data/` and will survive container restarts/recreates. You would only need to re-download if you delete `./nuclear_data/` (or run the backend without that volume mount).
 
 ### MongoDB Connection Issues
 
