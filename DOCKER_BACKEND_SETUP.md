@@ -65,7 +65,7 @@ docker compose logs mongo
 docker compose logs -f backend
 ```
 
-### Step 4: Download Nuclear Data (Required for OpenMC Simulations)
+### Step 4: Download Nuclear Data (Required for OpenMC Simulations) - IGNORE, WILL BE INCLUDED WE CAN MAKE IT LIGHTWEIGHT LATER
 
 **Important**: The nuclear data library (~2-3 GB) is **not included** in the Docker image to keep it lightweight. You need to download it separately.
 

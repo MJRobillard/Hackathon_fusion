@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useBackendUrl } from './useBackendUrl';
 
 interface UseOpenMCStreamReturn {
   lines: string[];
@@ -15,6 +16,7 @@ interface UseOpenMCStreamReturn {
  * @returns Stream state and control functions
  */
 export function useOpenMCStream(runId: string): UseOpenMCStreamReturn {
+  const { currentUrl } = useBackendUrl();
   const [lines, setLines] = useState<string[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,9 +36,8 @@ export function useOpenMCStream(runId: string): UseOpenMCStreamReturn {
         eventSourceRef.current.close();
       }
 
-      // Determine API URL (adjust based on your backend)
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const streamUrl = `${apiUrl}/runs/${runId}/stream`;
+      // Use backend URL from hook
+      const streamUrl = `${currentUrl}/runs/${runId}/stream`;
 
       console.log('Connecting to OpenMC stream:', streamUrl);
 
@@ -102,7 +103,7 @@ export function useOpenMCStream(runId: string): UseOpenMCStreamReturn {
     connect();
   };
 
-  // Connect on mount
+  // Connect on mount and when URL or runId changes
   useEffect(() => {
     connect();
 
@@ -115,7 +116,7 @@ export function useOpenMCStream(runId: string): UseOpenMCStreamReturn {
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, [runId]);
+  }, [runId, currentUrl]);
 
   return {
     lines,

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Send, Zap, Brain } from 'lucide-react';
+import { Send, Zap, Brain, Settings } from 'lucide-react';
 import { ROUTING_BADGES } from '@/lib/constants';
+import { BackendUrlSettings } from './BackendUrlSettings';
 
 interface TopBarProps {
   onSubmit: (query: string, useLLM: boolean) => void;
@@ -14,6 +15,7 @@ interface TopBarProps {
 export function TopBar({ onSubmit, isProcessing, activeQueryId, activeStatus }: TopBarProps) {
   const [query, setQuery] = useState('Simulate a PWR pin cell at 4.5% enrichment and 600K temperature');
   const [useLLM, setUseLLM] = useState(false);
+  const [showBackendSettings, setShowBackendSettings] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +55,12 @@ export function TopBar({ onSubmit, isProcessing, activeQueryId, activeStatus }: 
   };
 
   return (
-    <div className="bg-gray-900 border-b border-gray-800 px-6 py-3">
+    <div className="bg-gray-900 border-b border-gray-800 px-6 py-3 relative">
+      {showBackendSettings && (
+        <div className="absolute top-full right-6 mt-2 z-50">
+          <BackendUrlSettings onClose={() => setShowBackendSettings(false)} />
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="flex items-center gap-3">
         <div className="flex-1 flex items-center gap-3">
           <input
@@ -114,6 +121,16 @@ export function TopBar({ onSubmit, isProcessing, activeQueryId, activeStatus }: 
             {getStatusBadge()}
           </div>
         )}
+
+        {/* Backend Settings Button */}
+        <button
+          type="button"
+          onClick={() => setShowBackendSettings(!showBackendSettings)}
+          className="p-2 hover:bg-gray-800 rounded-lg transition-colors text-gray-400 hover:text-gray-200"
+          title="Backend Connection Settings"
+        >
+          <Settings size={18} />
+        </button>
       </form>
     </div>
   );

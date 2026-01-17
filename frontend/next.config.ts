@@ -1,8 +1,10 @@
 import type { NextConfig } from "next";
 
 // Backend URL for Next.js rewrites (server-side proxy)
-// This reads from BUILD-time env var set by Dockerfile
-// In Docker, default to backend service name; locally, use localhost
+// Note: This is only used for server-side rendering. Client-side code uses
+// the BackendUrlProvider which allows users to toggle between local/remote.
+// Server-side rewrites won't work for localhost when deployed on Vercel,
+// but client-side code will connect directly to the configured URL.
 const backendUrl =
   process.env.BACKEND_URL ||
   process.env.NEXT_PUBLIC_API_URL ||

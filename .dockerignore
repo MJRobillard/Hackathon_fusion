@@ -7,10 +7,3 @@
 frontend/node_modules/
 frontend/.next/
 node_modules/
-# Exclude nuclear_data - users should download it separately
-nuclear_data
-nuclear_data/
-**/nuclear_data
-**/nuclear_data/
-nuclear_data/**
-**/nuclear_data/**

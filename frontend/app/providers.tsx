@@ -1,7 +1,20 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { BackendUrlProvider, useBackendUrlContext } from '@/lib/backendUrlContext';
+import { setBackendUrlGetter } from '@/lib/api';
+
+// Component to sync backend URL with API service
+function BackendUrlSync() {
+  const { currentUrl } = useBackendUrlContext();
+  
+  useEffect(() => {
+    setBackendUrlGetter(() => currentUrl);
+  }, [currentUrl]);
+  
+  return null;
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -18,7 +31,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <BackendUrlProvider>
+        <BackendUrlSync />
+        {children}
+      </BackendUrlProvider>
     </QueryClientProvider>
   );
 }

@@ -3,13 +3,36 @@
  * Handles all communication with the backend API
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+// Function to get the current backend URL
+// This will be set by the BackendUrlProvider
+let getBackendUrl: (() => string) | null = null;
+
+export function setBackendUrlGetter(fn: () => string) {
+  getBackendUrl = fn;
+}
+
+function getCurrentBackendUrl(): string {
+  if (getBackendUrl) {
+    return getBackendUrl();
+  }
+  // Fallback to localhost if not set
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('aonp_backend_url');
+      if (stored) {
+        const config = JSON.parse(stored);
+        return config.mode === 'local' ? config.localUrl : config.remoteUrl || 'http://localhost:8000';
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
+  return 'http://localhost:8000';
+}
 
 class APIService {
-  private baseUrl: string;
-
-  constructor() {
-    this.baseUrl = API_BASE_URL;
+  private get baseUrl(): string {
+    return getCurrentBackendUrl();
   }
 
   private async fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -65,6 +88,10 @@ class APIService {
   createEventStream(queryId: string): EventSource {
     const url = `${this.baseUrl}/api/v1/query/${queryId}/stream`;
     return new EventSource(url);
+  }
+
+  getBaseUrl(): string {
+    return this.baseUrl;
   }
 
   // Runs endpoints

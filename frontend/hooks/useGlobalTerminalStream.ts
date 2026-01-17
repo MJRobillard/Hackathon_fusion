@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useBackendUrl } from './useBackendUrl';
 
 interface TerminalEvent {
   timestamp: string;
@@ -22,6 +23,7 @@ interface UseGlobalTerminalStreamReturn {
  * @returns Stream state and control functions
  */
 export function useGlobalTerminalStream(): UseGlobalTerminalStreamReturn {
+  const { currentUrl } = useBackendUrl();
   const [lines, setLines] = useState<string[]>([]);
   const [events, setEvents] = useState<TerminalEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -36,9 +38,8 @@ export function useGlobalTerminalStream(): UseGlobalTerminalStreamReturn {
         eventSourceRef.current.close();
       }
 
-      // Connect to main API for terminal stream
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const streamUrl = `${apiUrl}/api/v1/terminal/stream`;
+      // Use backend URL from hook
+      const streamUrl = `${currentUrl}/api/v1/terminal/stream`;
 
       console.log('Connecting to global terminal stream:', streamUrl);
 
@@ -109,7 +110,7 @@ export function useGlobalTerminalStream(): UseGlobalTerminalStreamReturn {
     setEvents([]);
   };
 
-  // Connect on mount
+  // Connect on mount and when URL changes
   useEffect(() => {
     // Add a small delay before connecting to avoid race conditions
     const timer = setTimeout(() => {
@@ -126,7 +127,7 @@ export function useGlobalTerminalStream(): UseGlobalTerminalStreamReturn {
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, []);
+  }, [currentUrl]);
 
   return {
     lines,

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useBackendUrl } from './useBackendUrl';
 
 export interface OpenMCRunToolEvent {
   timestamp: string;
@@ -24,6 +25,7 @@ interface UseOpenMCBackendRunStreamReturn {
  *   GET /api/v1/openmc/simulations/{runId}/stream  (SSE)
  */
 export function useOpenMCBackendRunStream(runId: string | null): UseOpenMCBackendRunStreamReturn {
+  const { currentUrl } = useBackendUrl();
   const [logLines, setLogLines] = useState<string[]>([]);
   const [toolEvents, setToolEvents] = useState<OpenMCRunToolEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -38,8 +40,8 @@ export function useOpenMCBackendRunStream(runId: string | null): UseOpenMCBacken
   useEffect(() => {
     if (!runId) return;
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const url = `${apiUrl}/api/v1/openmc/simulations/${runId}/stream`;
+    // Use backend URL from hook
+    const url = `${currentUrl}/api/v1/openmc/simulations/${runId}/stream`;
 
     // Close any prior stream
     if (esRef.current) esRef.current.close();
@@ -155,7 +157,7 @@ export function useOpenMCBackendRunStream(runId: string | null): UseOpenMCBacken
       es.close();
       setIsConnected(false);
     };
-  }, [runId]);
+  }, [runId, currentUrl]);
 
   return { logLines, toolEvents, isConnected, error, clear };
 }
