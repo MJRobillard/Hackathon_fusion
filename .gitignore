@@ -10,7 +10,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+
+
 lib64/
 parts/
 sdist/
@@ -61,3 +62,9 @@ logs/
 .env
 .env.local
 
+# Docker image exports
+*.tar
+*.tar.gz
+*.gz
+backend-image.tar
+frontend-image.tar
