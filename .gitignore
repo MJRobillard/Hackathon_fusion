@@ -1,0 +1,88 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# AONP specific
+runs/
+bundles/
+*.h5
+*.hdf5
+*.parquet
+nuclear_data/
+cross_sections.xml
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker image exports and bundles
+docker-migration-bundle-big/
+*.tar
+*.tar.gz
+*.gz
+backend-image.tar
+frontend-image.tar
+
+# Environment variables
+.env
+.env.local
+
+# Node.js (for frontend)
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Next.js
+.next/
+out/
+tsconfig.tsbuildinfo
+
+# Coverage and build
+coverage/
+build/
