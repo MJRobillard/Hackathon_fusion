@@ -28,6 +28,41 @@ services:
       retries: 3
       start_period: 40s
 
+  openmc-data:
+    image: openmc/openmc:latest
+    volumes:
+      # IMPORTANT: mount the shared volume somewhere else so we DON'T mask the
+      # image-bundled data at /opt/openmc/data.
+      - openmc_data:/data
+    entrypoint: ["/bin/sh", "-c"]
+    # Copy nuclear data from the image into the shared volume once, then keep alive.
+    command:
+      - |
+        set -e
+        mkdir -p /data
+        if [ ! -f /data/.openmc_data_ready ]; then
+          echo "[openmc-data] Initializing nuclear data volume from image..."
+          if [ -d /opt/openmc/data ] && [ "$(ls -A /opt/openmc/data 2>/dev/null)" ]; then
+            cp -an /opt/openmc/data/. /data/ 2>/dev/null || cp -a /opt/openmc/data/* /data/ 2>/dev/null || true
+            touch /data/.openmc_data_ready
+            echo "[openmc-data] Nuclear data ready."
+          else
+            echo "[openmc-data] Warning: /opt/openmc/data not found or empty in image. Creating marker file."
+            echo "[openmc-data] Nuclear data will need to be downloaded manually or may be available at runtime."
+            touch /data/.openmc_data_ready
+          fi
+        else
+          echo "[openmc-data] Nuclear data already initialized."
+        fi
+        sleep infinity
+    healthcheck:
+      test: ["CMD", "test", "-f", "/data/.openmc_data_ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 120
+      start_period: 5s
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -39,20 +74,25 @@ services:
       CORS_ORIGINS: http://localhost:3000
       FIREWORKS: ${FIREWORKS-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY-}
-      # OPENMC_CROSS_SECTIONS will be set automatically by start_server.py if nuclear_data exists
-      # If not found, user will be prompted to download it
-      RUN_LOCAL: ${RUN_LOCAL:-false}
+      # OPENMC_CROSS_SECTIONS will be set automatically by start_server.py
+      # Priority: /opt/openmc/data (from openmc-data service) > /app/nuclear_data (host mount) > env var
+      RUN_LOCAL: ${RUN_LOCAL:-true}
       LOCAL_DEEPSEEK_URL: http://ollama:11434
     ports:
       - "8000:8000"
     volumes:
-      # Optional: Mount nuclear_data if it exists on host
-      # If not present, the startup script will prompt user to download it
-      # Writable volume allows downloading data inside container
+      # Primary: Mount OpenMC data from openmc-data service (includes nuclear data)
+      - openmc_data:/opt/openmc/data:ro
+      # Fallback: Optional host-mounted nuclear_data (if exists, takes precedence)
+      # Writable volume allows downloading data inside container if needed
       - ./nuclear_data:/app/nuclear_data
     depends_on:
-      - mongo
-      - ollama
+      mongo:
+        condition: service_started
+      ollama:
+        condition: service_started
+      openmc-data:
+        condition: service_healthy
 
   frontend:
     build:
@@ -68,3 +108,4 @@ services:
 volumes:
   mongo_data:
   ollama_data:
+  openmc_data:
